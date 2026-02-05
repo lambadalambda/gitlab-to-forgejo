@@ -7,7 +7,7 @@ from gitlab_to_forgejo.migrator import push_merge_request_heads
 from gitlab_to_forgejo.plan_builder import MergeRequestPlan, Plan, RepoPlan
 
 
-def test_push_merge_request_heads_pushes_synthetic_branches_for_missing_source_branch(
+def test_push_merge_request_heads_pushes_synthetic_branches_for_merge_request_heads(
     tmp_path: Path,
 ) -> None:
     bundle = tmp_path / "001.bundle"
@@ -83,7 +83,10 @@ def test_push_merge_request_heads_pushes_synthetic_branches_for_missing_source_b
     assert push.call_count == 1
     first = push.call_args_list[0].kwargs
     assert first["remote_url"] == "http://example.test/pleroma/docs.git"
-    assert first["refspecs"] == ["b" * 40 + ":refs/heads/gitlab-mr-iid-3"]
+    assert first["refspecs"] == [
+        "b" * 40 + ":refs/heads/gitlab-mr-iid-3",
+        "c" * 40 + ":refs/heads/gitlab-mr-iid-4",
+    ]
     assert first["username"] == "root"
     assert first["token"] == "t0"
 

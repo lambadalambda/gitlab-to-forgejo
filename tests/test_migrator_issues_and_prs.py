@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from gitlab_to_forgejo.forgejo_client import ForgejoError, ForgejoNotFound
 from gitlab_to_forgejo.migrator import apply_issues, apply_merge_requests, apply_notes
-from gitlab_to_forgejo.plan_builder import MergeRequestPlan, Plan, build_plan
+from gitlab_to_forgejo.plan_builder import MergeRequestPlan, Plan, RepoPlan, build_plan
 
 
 def _fixture_backup_root() -> Path:
@@ -89,7 +89,7 @@ def test_apply_issues_merge_requests_and_notes_from_fixture() -> None:
 
     assert client.calls[1][0] == "create_pull_request"
     assert client.calls[1][1:4] == ("pleroma", "docs", "Add dropdown menu")
-    assert client.calls[1][5:7] == ("features/menu", "master")
+    assert client.calls[1][5:7] == ("gitlab-mr-iid-3", "master")
     assert client.calls[1][7] == "lanodan"
 
     comment_calls = [c for c in client.calls if c[0] == "create_issue_comment"]
@@ -137,6 +137,63 @@ def test_apply_merge_requests_falls_back_to_merge_request_head_sha_when_branch_m
     assert client.calls[0][5] == f"gitlab-mr-iid-{original.gitlab_mr_iid}"
 
 
+def test_apply_merge_requests_uses_synthetic_head_branch_when_head_commit_sha_present(
+    tmp_path: Path,
+) -> None:
+    refs_path = tmp_path / "repo.refs"
+    refs_path.write_text(
+        "\n".join(
+            [
+                "aaaaaaaa refs/heads/weblate",
+                "bbbbbbbb refs/heads/master",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    repo = RepoPlan(
+        owner="pleroma",
+        name="pleroma-fe",
+        gitlab_project_id=1,
+        gitlab_disk_path="@hashed/aa/bb/pleroma-fe",
+        bundle_path=tmp_path / "repo.bundle",
+        refs_path=refs_path,
+        wiki_bundle_path=tmp_path / "wiki.bundle",
+        wiki_refs_path=tmp_path / "wiki.refs",
+    )
+
+    plan = Plan(
+        backup_id="x",
+        orgs=[],
+        repos=[repo],
+        users=[],
+        org_members={},
+        issues=[],
+        merge_requests=[
+            MergeRequestPlan(
+                gitlab_mr_id=123,
+                gitlab_mr_iid=7,
+                gitlab_target_project_id=1,
+                source_branch="weblate",
+                target_branch="master",
+                title="MR",
+                description="D",
+                author_id=1,
+                state_id=1,
+                head_commit_sha="c" * 40,
+            )
+        ],
+        notes=[],
+    )
+
+    client = _FakeForgejo()
+    apply_merge_requests(plan, client, user_by_id={1: "alice"})
+
+    assert client.calls[0][0] == "create_pull_request"
+    assert client.calls[0][5:7] == ("gitlab-mr-iid-7", "master")
+
+
 def test_apply_merge_requests_uses_base_commit_sha_when_target_branch_missing() -> None:
     plan = build_plan(_fixture_backup_root(), root_group_path="pleroma")
     client = _FakeForgejo()
@@ -170,7 +227,7 @@ def test_apply_merge_requests_uses_base_commit_sha_when_target_branch_missing() 
 
     assert client.calls[0][0] == "create_pull_request"
     assert client.calls[0][5:7] == (
-        original.source_branch,
+        f"gitlab-mr-iid-{original.gitlab_mr_iid}",
         f"gitlab-mr-base-iid-{original.gitlab_mr_iid}",
     )
 
@@ -217,7 +274,7 @@ def test_apply_merge_requests_retries_on_transient_404() -> None:
     assert [c[0] for c in client.calls].count("create_pull_request") == 2
 
 
-def test_apply_merge_requests_falls_back_to_issue_when_branch_missing_and_not_merged() -> None:
+def test_apply_merge_requests_uses_merge_request_head_ref_when_branch_missing() -> None:
     plan = build_plan(_fixture_backup_root(), root_group_path="pleroma")
     client = _FakeForgejo()
     forgejo_user_by_gitlab_user_id = {u.gitlab_user_id: u.username for u in plan.users}
@@ -250,7 +307,7 @@ def test_apply_merge_requests_falls_back_to_issue_when_branch_missing_and_not_me
     )
 
     assert numbers == {original.gitlab_mr_id: 1}
-    assert client.calls[0][0] == "create_issue"
+    assert client.calls[0][0] == "create_pull_request"
 
 
 class _NoChangesPullRequestForgejo(_FakeForgejo):

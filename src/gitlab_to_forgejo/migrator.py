@@ -631,16 +631,14 @@ def push_merge_request_heads(
                 refs = {}
             refs_by_project_id[repo.gitlab_project_id] = refs
 
-        source_branch_ref = f"refs/heads/{mr.source_branch}"
-        if source_branch_ref not in refs and mr.state_id == 3:
-            sha = mr.head_commit_sha
-            if not sha:
-                mr_ref = f"refs/merge-requests/{mr.gitlab_mr_iid}/head"
-                sha = refs.get(mr_ref, "")
-            if sha:
-                branch_name = f"gitlab-mr-iid-{mr.gitlab_mr_iid}"
-                refspec = f"{sha}:refs/heads/{branch_name}"
-                refspecs_by_project_id.setdefault(repo.gitlab_project_id, []).append(refspec)
+        sha = mr.head_commit_sha
+        if not sha:
+            mr_ref = f"refs/merge-requests/{mr.gitlab_mr_iid}/head"
+            sha = refs.get(mr_ref, "")
+        if sha:
+            branch_name = f"gitlab-mr-iid-{mr.gitlab_mr_iid}"
+            refspec = f"{sha}:refs/heads/{branch_name}"
+            refspecs_by_project_id.setdefault(repo.gitlab_project_id, []).append(refspec)
 
         target_branch_ref = f"refs/heads/{mr.target_branch}"
         if target_branch_ref not in refs and mr.base_commit_sha:
@@ -749,12 +747,11 @@ def apply_merge_requests(
             refs_by_project_id[repo.gitlab_project_id] = refs
 
         source_branch_ref = f"refs/heads/{mr.source_branch}"
-        if source_branch_ref in refs:
-            head = mr.source_branch
-        elif mr.state_id == 3 and (
-            mr.head_commit_sha or refs.get(f"refs/merge-requests/{mr.gitlab_mr_iid}/head")
-        ):
+        head_sha = mr.head_commit_sha or refs.get(f"refs/merge-requests/{mr.gitlab_mr_iid}/head")
+        if head_sha:
             head = f"gitlab-mr-iid-{mr.gitlab_mr_iid}"
+        elif source_branch_ref in refs:
+            head = mr.source_branch
         else:
             body = "\n".join(
                 [
