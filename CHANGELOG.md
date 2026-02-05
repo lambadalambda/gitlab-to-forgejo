@@ -31,6 +31,7 @@ The format is based on *Keep a Changelog*.
 - Git HTTP push chunking to avoid OS command-line length limits when pushing many refs.
 - `--only-repo` / `GITLAB_ONLY_REPO` filter to run a fast single-repo migration for debugging.
 - Forgejo DB post-processing (`src/gitlab_to_forgejo/forgejo_db.py`) to backfill historical issue/comment timestamps and issue open/closed state (including PR opening posts and MRs imported as issues).
+- Optional GitLab password hash migration: `--migrate-password-hashes` (or `FORGEJO_MIGRATE_PASSWORD_HASHES=1`) copies GitLab `users.encrypted_password` bcrypt hashes into Forgejo via direct DB update so users can keep their existing passwords (best-effort; GitLab password “pepper” setups may not be compatible).
 
 ### Fixed
 

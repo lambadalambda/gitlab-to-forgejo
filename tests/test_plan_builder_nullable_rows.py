@@ -88,3 +88,28 @@ def test_build_plan_reads_merge_request_base_commit_sha_from_merge_request_diffs
     mr = next(m for m in plan.merge_requests if m.gitlab_mr_id == int(mr_id))
     assert mr.head_commit_sha == head_sha
     assert mr.base_commit_sha == base_sha
+
+
+def test_build_plan_reads_user_encrypted_password() -> None:
+    original = plan_builder.iter_copy_rows
+
+    encrypted_password = "$2a$10$7EqJtq98hPqEX7fNZaFWoOa6F0lB1/6v7tKqB8p0fTrbqXc9F3u6y"
+
+    def injected_iter_copy_rows(path: Path, *, tables: set[str]):
+        yield from original(path, tables=tables)
+        if tables == {"members", "issues", "merge_requests", "notes", "users", "labels"}:
+            yield "users", {
+                "id": "43",
+                "username": "lanodan",
+                "email": "lanodan@example.com",
+                "name": "Lanodan",
+                "state": "active",
+                "avatar": None,
+                "encrypted_password": encrypted_password,
+            }
+
+    with patch.object(plan_builder, "iter_copy_rows", side_effect=injected_iter_copy_rows):
+        plan = plan_builder.build_plan(_fixture_backup_root(), root_group_path="pleroma")
+
+    user = next(u for u in plan.users if u.gitlab_user_id == 43)
+    assert user.gitlab_encrypted_password == encrypted_password

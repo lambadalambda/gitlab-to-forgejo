@@ -8,6 +8,7 @@
 - **Small, topical commits**: one concern per commit; update `CHANGELOG.md` with each commit.
 - **Commit after each feature/fix**: don’t accumulate large uncommitted diffs; land work in a sequence of small commits as you go.
 - **Historical correctness**: issue open/closed state and timestamps (issues + comments) must match GitLab; if Forgejo’s API can’t set them, use DB post-processing.
+- **Passwords**: default is a single known `--user-password` for created users (dev-friendly). If you need to preserve GitLab passwords, enable `--migrate-password-hashes` / `FORGEJO_MIGRATE_PASSWORD_HASHES=1` to copy GitLab bcrypt hashes into Forgejo via direct DB update (best-effort; may be incompatible with GitLab “pepper” setups).
 
 ## Repository conventions
 

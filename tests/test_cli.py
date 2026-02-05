@@ -58,6 +58,34 @@ def test_cli_migrate_builds_plan_and_applies(tmp_path: Path) -> None:
     assert migrate_plan.call_args.kwargs["forgejo_url"] == "http://example.test"
     assert migrate_plan.call_args.kwargs["git_username"] == "root"
     assert migrate_plan.call_args.kwargs["git_token"] == "t0"
+    assert migrate_plan.call_args.kwargs["migrate_password_hashes"] is False
+
+
+def test_cli_migrate_can_enable_password_hash_migration(tmp_path: Path) -> None:
+    token_file = tmp_path / "token"
+    token_file.write_text("t0\n", encoding="utf-8")
+
+    with (
+        patch("gitlab_to_forgejo.cli.migrate_plan") as migrate_plan,
+        patch("gitlab_to_forgejo.cli.ForgejoClient"),
+    ):
+        rc = cli.main(
+            [
+                "migrate",
+                "--backup",
+                str(_fixture_backup_root()),
+                "--root-group",
+                "pleroma",
+                "--forgejo-url",
+                "http://example.test",
+                "--token-file",
+                str(token_file),
+                "--migrate-password-hashes",
+            ]
+        )
+
+    assert rc == 0
+    assert migrate_plan.call_args.kwargs["migrate_password_hashes"] is True
 
 
 def test_cli_migrate_supports_only_repo_filter(tmp_path: Path) -> None:

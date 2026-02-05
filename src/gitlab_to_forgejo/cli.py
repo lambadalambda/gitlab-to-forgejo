@@ -30,6 +30,13 @@ def _default_git_username() -> str:
     )
 
 
+def _env_truthy(name: str, *, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _read_token_file(path: Path) -> str:
     token = path.read_text(encoding="utf-8", errors="replace").strip()
     if not token:
@@ -195,6 +202,16 @@ def _build_parser() -> argparse.ArgumentParser:
         default=True,
         help="Create repositories as private (default: true)",
     )
+    migrate.add_argument(
+        "--migrate-password-hashes",
+        action=argparse.BooleanOptionalAction,
+        default=_env_truthy("FORGEJO_MIGRATE_PASSWORD_HASHES", default=False),
+        help=(
+            "Overwrite Forgejo password hashes with GitLab bcrypt hashes via direct DB update "
+            "(default: false; opt-in via --migrate-password-hashes or "
+            "FORGEJO_MIGRATE_PASSWORD_HASHES=1)."
+        ),
+    )
 
     return parser
 
@@ -219,6 +236,7 @@ def main(argv: list[str] | None = None) -> int:
             forgejo_url=args.forgejo_url,
             git_username=args.git_username,
             git_token=token,
+            migrate_password_hashes=args.migrate_password_hashes,
         )
         return 0
 

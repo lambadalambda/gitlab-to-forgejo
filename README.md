@@ -36,6 +36,10 @@ For faster iteration, restrict migration to a single repo:
 - `GITLAB_ONLY_REPO=pleroma/docs mise run migrate-real`
 - `GITLAB_ONLY_REPO=pleroma/docs mise run migrate` (fixture)
 
+To (best-effort) preserve GitLab user passwords by copying bcrypt hashes into Forgejo via DB update (opt-in):
+
+- `FORGEJO_MIGRATE_PASSWORD_HASHES=1 mise run migrate-real`
+
 If ports are already in use, override with:
 
 - `FORGEJO_HTTP_PORT=3001 FORGEJO_SSH_PORT=2223 mise run up`

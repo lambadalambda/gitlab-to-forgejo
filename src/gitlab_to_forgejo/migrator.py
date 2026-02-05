@@ -7,7 +7,11 @@ from collections.abc import Mapping
 from typing import Protocol
 
 from gitlab_to_forgejo.forgejo_client import ForgejoError
-from gitlab_to_forgejo.forgejo_db import apply_metadata_fix_sql, build_metadata_fix_sql
+from gitlab_to_forgejo.forgejo_db import (
+    apply_metadata_fix_sql,
+    build_metadata_fix_sql,
+    build_password_hash_fix_sql,
+)
 from gitlab_to_forgejo.forgejo_wiki import ensure_wiki_repo_exists
 from gitlab_to_forgejo.git_push import push_bundle_http
 from gitlab_to_forgejo.git_refs import guess_default_branch, list_wiki_push_refspecs, read_ref_shas
@@ -1054,6 +1058,7 @@ def migrate_plan(
     forgejo_url: str,
     git_username: str,
     git_token: str,
+    migrate_password_hashes: bool = False,
 ) -> None:
     forgejo_username_by_gitlab_username = apply_plan(plan, client, user_password=user_password)
     forgejo_user_by_gitlab_user_id: dict[int, str] = {}
@@ -1061,6 +1066,14 @@ def migrate_plan(
         forgejo_username = forgejo_username_by_gitlab_username.get(u.username)
         if forgejo_username:
             forgejo_user_by_gitlab_user_id[u.gitlab_user_id] = forgejo_username
+
+    if migrate_password_hashes:
+        sql = build_password_hash_fix_sql(
+            plan,
+            forgejo_username_by_gitlab_username=forgejo_username_by_gitlab_username,
+            skip_forgejo_usernames={"root", git_username},
+        )
+        apply_metadata_fix_sql(sql)
 
     upload_bytes_by_upload: dict[GitLabProjectUpload, bytes] = {}
     if plan.uploads_tar_path is not None:

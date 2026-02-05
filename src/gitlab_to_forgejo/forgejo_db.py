@@ -10,6 +10,51 @@ def _sql_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
+_BCRYPT_HASH_PREFIXES = ("$2a$", "$2b$", "$2y$")
+
+
+def build_password_hash_fix_sql(
+    plan: Plan,
+    *,
+    forgejo_username_by_gitlab_username: Mapping[str, str],
+    skip_forgejo_usernames: set[str] | None = None,
+) -> str:
+    """Build SQL to overwrite Forgejo password hashes with GitLab bcrypt hashes.
+
+    This is a bespoke migration helper and intentionally uses direct DB updates because
+    Forgejo's API does not provide an endpoint to set password hashes.
+    """
+    updates: list[str] = []
+    skip = skip_forgejo_usernames or set()
+
+    for user in plan.users:
+        hashed = (user.gitlab_encrypted_password or "").strip()
+        if not hashed:
+            continue
+        if not hashed.startswith(_BCRYPT_HASH_PREFIXES):
+            continue
+
+        forgejo_username = forgejo_username_by_gitlab_username.get(user.username)
+        if not forgejo_username or forgejo_username in skip:
+            continue
+
+        updates.extend(
+            [
+                f"-- gitlab user {user.username} -> forgejo user {forgejo_username}",
+                'UPDATE "user" u',
+                "SET",
+                f"  passwd = {_sql_literal(hashed)},",
+                "  passwd_hash_algo = 'bcrypt'",
+                f"WHERE u.lower_name = lower({_sql_literal(forgejo_username)});",
+            ]
+        )
+
+    if not updates:
+        return ""
+
+    return "\n".join(["BEGIN;", *updates, "COMMIT;", ""])
+
+
 def build_metadata_fix_sql(
     plan: Plan,
     *,

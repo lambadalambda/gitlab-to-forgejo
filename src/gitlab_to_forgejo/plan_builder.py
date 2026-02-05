@@ -37,6 +37,7 @@ class UserPlan:
     full_name: str
     state: str
     avatar: str | None = None
+    gitlab_encrypted_password: str | None = None
 
 
 @dataclass(frozen=True)
@@ -448,6 +449,7 @@ def build_plan(backup_root: Path, *, root_group_path: str) -> Plan:
             user_id = int(row["id"])
             if user_id not in interacting_user_ids:
                 continue
+            encrypted_password = row.get("encrypted_password") or None
             users_by_id[user_id] = UserPlan(
                 gitlab_user_id=user_id,
                 username=row["username"] or "",
@@ -455,6 +457,7 @@ def build_plan(backup_root: Path, *, root_group_path: str) -> Plan:
                 full_name=row["name"] or "",
                 state=row["state"] or "",
                 avatar=row.get("avatar") or None,
+                gitlab_encrypted_password=encrypted_password,
             )
         elif table == "labels":
             label_id_raw = row.get("id")
