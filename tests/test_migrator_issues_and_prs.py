@@ -171,7 +171,7 @@ def test_apply_merge_requests_uses_base_commit_sha_when_target_branch_missing() 
     assert client.calls[0][0] == "create_pull_request"
     assert client.calls[0][5:7] == (
         original.source_branch,
-        "8d363825a9a6a94a4db1bc8da1be5b3afd2441fb",
+        f"gitlab-mr-base-iid-{original.gitlab_mr_iid}",
     )
 
 

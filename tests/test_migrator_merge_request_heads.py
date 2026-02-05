@@ -86,3 +86,70 @@ def test_push_merge_request_heads_pushes_synthetic_branches_for_missing_source_b
     assert first["refspecs"] == ["b" * 40 + ":refs/heads/gitlab-mr-iid-3"]
     assert first["username"] == "root"
     assert first["token"] == "t0"
+
+
+def test_push_merge_request_heads_pushes_synthetic_base_branch_for_missing_target_branch(
+    tmp_path: Path,
+) -> None:
+    bundle = tmp_path / "001.bundle"
+    bundle.write_bytes(b"not a real bundle")
+
+    refs = tmp_path / "001.refs"
+    refs.write_text(
+        "\n".join(
+            [
+                "deadbeef HEAD",
+                "aaaaaaaa refs/heads/feature",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    repo = RepoPlan(
+        owner="pleroma",
+        name="docs",
+        gitlab_project_id=1,
+        gitlab_disk_path="@hashed/aa/bb/docs",
+        bundle_path=bundle,
+        refs_path=refs,
+        wiki_bundle_path=tmp_path / "wiki.bundle",
+        wiki_refs_path=tmp_path / "wiki.refs",
+    )
+
+    plan = Plan(
+        backup_id="b",
+        orgs=[],
+        repos=[repo],
+        users=[],
+        org_members={},
+        issues=[],
+        merge_requests=[
+            MergeRequestPlan(
+                gitlab_mr_id=101,
+                gitlab_mr_iid=3,
+                gitlab_target_project_id=1,
+                source_branch="feature",
+                target_branch="missing-base",
+                title="t",
+                description="d",
+                author_id=1,
+                state_id=1,
+                base_commit_sha="b" * 40,
+            ),
+        ],
+        notes=[],
+    )
+
+    with patch("gitlab_to_forgejo.migrator.push_bundle_http") as push:
+        push_merge_request_heads(
+            plan,
+            forgejo_url="http://example.test",
+            git_username="root",
+            git_token="t0",
+        )
+
+    assert push.call_count == 1
+    first = push.call_args_list[0].kwargs
+    assert first["remote_url"] == "http://example.test/pleroma/docs.git"
+    assert first["refspecs"] == ["b" * 40 + ":refs/heads/gitlab-mr-base-iid-3"]

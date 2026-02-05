@@ -391,11 +391,15 @@ def push_wikis(plan: Plan, *, forgejo_url: str, git_username: str, git_token: st
 def push_merge_request_heads(
     plan: Plan, *, forgejo_url: str, git_username: str, git_token: str
 ) -> None:
-    """Create synthetic branches in Forgejo for merged GitLab MRs missing their source branches.
+    """Create synthetic branches in Forgejo for GitLab MRs missing source/target branches.
 
     Forgejo's PR API requires a head branch name; it does not accept raw commit SHAs as `head`.
     For merged MRs where the original source branch no longer exists, create a deterministic
     branch `gitlab-mr-iid-<iid>` pointing at the MR head commit SHA.
+
+    Forgejo also assumes the PR base is a branch name during merge-base calculation. When a
+    GitLab MR targets a branch that is missing from the GitLab backup, create a deterministic
+    base branch `gitlab-mr-base-iid-<iid>` pointing at `merge_request_diffs.base_commit_sha`.
     """
     base = forgejo_url.rstrip("/")
     repo_by_project_id = {r.gitlab_project_id: r for r in plan.repos}
@@ -415,21 +419,22 @@ def push_merge_request_heads(
                 refs = {}
             refs_by_project_id[repo.gitlab_project_id] = refs
 
-        if f"refs/heads/{mr.source_branch}" in refs:
-            continue
-        if mr.state_id != 3:
-            continue
+        source_branch_ref = f"refs/heads/{mr.source_branch}"
+        if source_branch_ref not in refs and mr.state_id == 3:
+            sha = mr.head_commit_sha
+            if not sha:
+                mr_ref = f"refs/merge-requests/{mr.gitlab_mr_iid}/head"
+                sha = refs.get(mr_ref, "")
+            if sha:
+                branch_name = f"gitlab-mr-iid-{mr.gitlab_mr_iid}"
+                refspec = f"{sha}:refs/heads/{branch_name}"
+                refspecs_by_project_id.setdefault(repo.gitlab_project_id, []).append(refspec)
 
-        sha = mr.head_commit_sha
-        if not sha:
-            mr_ref = f"refs/merge-requests/{mr.gitlab_mr_iid}/head"
-            sha = refs.get(mr_ref, "")
-        if not sha:
-            continue
-
-        branch_name = f"gitlab-mr-iid-{mr.gitlab_mr_iid}"
-        refspec = f"{sha}:refs/heads/{branch_name}"
-        refspecs_by_project_id.setdefault(repo.gitlab_project_id, []).append(refspec)
+        target_branch_ref = f"refs/heads/{mr.target_branch}"
+        if target_branch_ref not in refs and mr.base_commit_sha:
+            branch_name = f"gitlab-mr-base-iid-{mr.gitlab_mr_iid}"
+            refspec = f"{mr.base_commit_sha}:refs/heads/{branch_name}"
+            refspecs_by_project_id.setdefault(repo.gitlab_project_id, []).append(refspec)
 
     for project_id, refspecs in refspecs_by_project_id.items():
         repo = repo_by_project_id[project_id]
@@ -532,11 +537,12 @@ def apply_merge_requests(
             pr_number_by_gitlab_mr_id[mr.gitlab_mr_id] = number
             continue
 
+        synthetic_base_branch = f"gitlab-mr-base-iid-{mr.gitlab_mr_iid}"
         target_branch_ref = f"refs/heads/{mr.target_branch}"
         if target_branch_ref in refs:
             base = mr.target_branch
         elif mr.base_commit_sha:
-            base = mr.base_commit_sha
+            base = synthetic_base_branch
         else:
             body = "\n".join(
                 [
@@ -581,8 +587,8 @@ def apply_merge_requests(
                 break
             except ForgejoError as err:
                 if _is_missing_pull_request_base(err):
-                    if mr.base_commit_sha and base != mr.base_commit_sha:
-                        base = mr.base_commit_sha
+                    if mr.base_commit_sha and base != synthetic_base_branch:
+                        base = synthetic_base_branch
                         continue
                     issue_body = "\n".join(
                         [

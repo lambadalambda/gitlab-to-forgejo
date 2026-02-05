@@ -47,3 +47,4 @@ The format is based on *Keep a Changelog*.
 - Notes with `project_id` missing are no longer dropped when the project can be inferred from the issue/MR.
 - GitLab `/uploads/...` comment attachment migration no longer fails when the comment author lacks write permission; the migrator retries comment-attachment uploads as the admin user.
 - MR import no longer crashes when the GitLab target branch is missing from the backup; the migrator uses `merge_request_diffs.base_commit_sha` as the PR base when available, otherwise falls back to importing the MR as an issue.
+- MR import no longer triggers Forgejo 500s when targeting a missing base branch: the migrator now pushes a synthetic base branch `gitlab-mr-base-iid-<iid>` pointing at `merge_request_diffs.base_commit_sha` and uses that as the PR base.
