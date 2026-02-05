@@ -137,6 +137,44 @@ def test_apply_merge_requests_falls_back_to_merge_request_head_sha_when_branch_m
     assert client.calls[0][5] == f"gitlab-mr-iid-{original.gitlab_mr_iid}"
 
 
+def test_apply_merge_requests_uses_base_commit_sha_when_target_branch_missing() -> None:
+    plan = build_plan(_fixture_backup_root(), root_group_path="pleroma")
+    client = _FakeForgejo()
+    forgejo_user_by_gitlab_user_id = {u.gitlab_user_id: u.username for u in plan.users}
+
+    original = plan.merge_requests[0]
+    mr = MergeRequestPlan(
+        gitlab_mr_id=original.gitlab_mr_id,
+        gitlab_mr_iid=original.gitlab_mr_iid,
+        gitlab_target_project_id=original.gitlab_target_project_id,
+        source_branch=original.source_branch,
+        target_branch="deleted-target-branch",
+        title=original.title,
+        description=original.description,
+        author_id=original.author_id,
+        state_id=original.state_id,
+        base_commit_sha="8d363825a9a6a94a4db1bc8da1be5b3afd2441fb",
+    )
+    plan_missing_target = Plan(
+        backup_id=plan.backup_id,
+        orgs=plan.orgs,
+        repos=plan.repos,
+        users=plan.users,
+        org_members=plan.org_members,
+        issues=[],
+        merge_requests=[mr],
+        notes=[],
+    )
+
+    apply_merge_requests(plan_missing_target, client, user_by_id=forgejo_user_by_gitlab_user_id)
+
+    assert client.calls[0][0] == "create_pull_request"
+    assert client.calls[0][5:7] == (
+        original.source_branch,
+        "8d363825a9a6a94a4db1bc8da1be5b3afd2441fb",
+    )
+
+
 class _FlakyPullRequestForgejo(_FakeForgejo):
     def __init__(self) -> None:
         super().__init__()

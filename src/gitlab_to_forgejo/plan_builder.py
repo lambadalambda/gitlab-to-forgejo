@@ -74,6 +74,7 @@ class MergeRequestPlan:
     gitlab_source_project_id: int | None = None
     state_id: int = 0
     head_commit_sha: str = ""
+    base_commit_sha: str = ""
     created_unix: int = 0
     updated_unix: int = 0
     closed_unix: int = 0
@@ -534,8 +535,9 @@ def build_plan(backup_root: Path, *, root_group_path: str) -> Plan:
         key=lambda label: (label.title.lower(), label.gitlab_label_id),
     )
 
-    # pass 3: merge_request_diffs (head commit SHAs)
+    # pass 3: merge_request_diffs (head/base commit SHAs)
     head_sha_by_diff_id: dict[int, str] = {}
+    base_sha_by_diff_id: dict[int, str] = {}
     if merge_request_diff_ids:
         for _, row in iter_copy_rows(db_path, tables={"merge_request_diffs"}):
             diff_id_raw = row.get("id")
@@ -545,6 +547,7 @@ def build_plan(backup_root: Path, *, root_group_path: str) -> Plan:
             if diff_id not in merge_request_diff_ids:
                 continue
             head_sha_by_diff_id[diff_id] = row.get("head_commit_sha") or ""
+            base_sha_by_diff_id[diff_id] = row.get("base_commit_sha") or ""
             if len(head_sha_by_diff_id) >= len(merge_request_diff_ids):
                 break
 
@@ -568,6 +571,9 @@ def build_plan(backup_root: Path, *, root_group_path: str) -> Plan:
         head_commit_sha = (
             head_sha_by_diff_id.get(latest_diff_id, "") if latest_diff_id is not None else ""
         )
+        base_commit_sha = (
+            base_sha_by_diff_id.get(latest_diff_id, "") if latest_diff_id is not None else ""
+        )
         merge_requests.append(
             MergeRequestPlan(
                 gitlab_mr_id=mr_id,
@@ -581,6 +587,7 @@ def build_plan(backup_root: Path, *, root_group_path: str) -> Plan:
                 gitlab_source_project_id=source_project_id,
                 state_id=state_id,
                 head_commit_sha=head_commit_sha,
+                base_commit_sha=base_commit_sha,
                 created_unix=created_unix,
                 updated_unix=updated_unix,
                 closed_unix=closed_unix,

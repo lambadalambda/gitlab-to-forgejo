@@ -219,6 +219,13 @@ def _is_transient_target_not_found(err: ForgejoError) -> bool:
     )
 
 
+def _is_missing_pull_request_base(err: ForgejoError) -> bool:
+    if err.status_code != 404:
+        return False
+    msg = err.body.lower()
+    return "could not find" in msg and "base repository" in msg
+
+
 def _is_no_changes_between_head_and_base(err: ForgejoError) -> bool:
     if err.status_code != 422:
         return False
@@ -504,6 +511,38 @@ def apply_merge_requests(
             pr_number_by_gitlab_mr_id[mr.gitlab_mr_id] = number
             continue
 
+        target_branch_ref = f"refs/heads/{mr.target_branch}"
+        if target_branch_ref in refs:
+            base = mr.target_branch
+        elif mr.base_commit_sha:
+            base = mr.base_commit_sha
+        else:
+            body = "\n".join(
+                [
+                    mr.description,
+                    "",
+                    (
+                        f"_Imported from GitLab MR !{mr.gitlab_mr_iid} "
+                        f"({mr.source_branch} → {mr.target_branch})_"
+                    ),
+                    "",
+                    (
+                        "_Forgejo pull request not created because the target branch "
+                        "does not exist in the GitLab backup._"
+                    ),
+                ]
+            ).strip()
+            resp = client.create_issue(
+                owner=repo.owner,
+                repo=repo.name,
+                title=f"MR: {mr.title}",
+                body=body,
+                sudo=user_by_id.get(mr.author_id),
+            )
+            number = int(resp["number"])
+            pr_number_by_gitlab_mr_id[mr.gitlab_mr_id] = number
+            continue
+
         delays = (0.2, 0.5, 1.0)
         resp: Mapping[str, object] | None = None
         created_issue = False
@@ -515,11 +554,40 @@ def apply_merge_requests(
                     title=mr.title,
                     body=mr.description,
                     head=head,
-                    base=mr.target_branch,
+                    base=base,
                     sudo=user_by_id.get(mr.author_id),
                 )
                 break
             except ForgejoError as err:
+                if _is_missing_pull_request_base(err):
+                    if mr.base_commit_sha and base != mr.base_commit_sha:
+                        base = mr.base_commit_sha
+                        continue
+                    issue_body = "\n".join(
+                        [
+                            mr.description,
+                            "",
+                            (
+                                f"_Imported from GitLab MR !{mr.gitlab_mr_iid} "
+                                f"({mr.source_branch} → {mr.target_branch})_"
+                            ),
+                            "",
+                            (
+                                "_Forgejo pull request not created because the target branch "
+                                "could not be resolved in the base repository._"
+                            ),
+                        ]
+                    ).strip()
+                    issue_resp = client.create_issue(
+                        owner=repo.owner,
+                        repo=repo.name,
+                        title=f"MR: {mr.title}",
+                        body=issue_body,
+                        sudo=user_by_id.get(mr.author_id),
+                    )
+                    pr_number_by_gitlab_mr_id[mr.gitlab_mr_id] = int(issue_resp["number"])
+                    created_issue = True
+                    break
                 if _is_no_changes_between_head_and_base(err):
                     issue_body = "\n".join(
                         [

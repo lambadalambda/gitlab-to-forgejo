@@ -44,3 +44,4 @@ The format is based on *Keep a Changelog*.
 - Default branch detection prefers `develop`/`trunk`/`stable` when `main`/`master` are absent.
 - Notes with `project_id` missing are no longer dropped when the project can be inferred from the issue/MR.
 - GitLab `/uploads/...` comment attachment migration no longer fails when the comment author lacks write permission; the migrator retries comment-attachment uploads as the admin user.
+- MR import no longer crashes when the GitLab target branch is missing from the backup; the migrator uses `merge_request_diffs.base_commit_sha` as the PR base when available, otherwise falls back to importing the MR as an issue.
