@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 from pathlib import Path
 
 from gitlab_to_forgejo.forgejo_client import ForgejoClient
 from gitlab_to_forgejo.migrator import migrate_plan
 from gitlab_to_forgejo.plan_builder import Plan, build_plan
+
+
+_STREAM_LOG_HANDLER_NAME = "gitlab_to_forgejo_stream"
+_ERRORS_FILE_HANDLER_NAME = "gitlab_to_forgejo_errors_file"
 
 
 def _default_backup_root() -> Path:
@@ -22,6 +27,10 @@ def _default_forgejo_url() -> str:
 
 def _default_token_file() -> Path:
     return Path(os.environ.get("FORGEJO_TOKEN_FILE", "state/forgejo/admin_token")).expanduser()
+
+
+def _default_errors_log_file() -> Path:
+    return Path(os.environ.get("FORGEJO_ERRORS_LOG", "state/errors.log")).expanduser()
 
 
 def _default_git_username() -> str:
@@ -44,6 +53,34 @@ def _read_token_file(path: Path) -> str:
     return token
 
 
+def _setup_logging(*, errors_log_path: Path) -> None:
+    root = logging.getLogger()
+    for handler in list(root.handlers):
+        if handler.name in {_STREAM_LOG_HANDLER_NAME, _ERRORS_FILE_HANDLER_NAME}:
+            root.removeHandler(handler)
+            handler.close()
+
+    root.setLevel(logging.INFO)
+
+    formatter = logging.Formatter(
+        fmt="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    stream = logging.StreamHandler()
+    stream.name = _STREAM_LOG_HANDLER_NAME
+    stream.setLevel(logging.INFO)
+    stream.setFormatter(formatter)
+    root.addHandler(stream)
+
+    errors_log_path.parent.mkdir(parents=True, exist_ok=True)
+    errors_file = logging.FileHandler(errors_log_path, mode="w", encoding="utf-8")
+    errors_file.name = _ERRORS_FILE_HANDLER_NAME
+    errors_file.setLevel(logging.ERROR)
+    errors_file.setFormatter(formatter)
+    root.addHandler(errors_file)
+
+
 def _parse_only_repo(value: str) -> tuple[str | None, str]:
     raw = value.strip().strip("/")
     if not raw:
@@ -57,11 +94,7 @@ def _parse_only_repo(value: str) -> tuple[str | None, str]:
 def _filter_plan_to_single_repo(plan: Plan, *, only_repo: str) -> Plan:
     owner, repo = _parse_only_repo(only_repo)
 
-    matches = [
-        r
-        for r in plan.repos
-        if r.name == repo and (owner is None or r.owner == owner)
-    ]
+    matches = [r for r in plan.repos if r.name == repo and (owner is None or r.owner == owner)]
     if not matches:
         hint = f"{owner + '/' if owner else ''}{repo}"
         raise ValueError(f"--only-repo {hint!r} did not match any planned repo")
@@ -102,9 +135,7 @@ def _filter_plan_to_single_repo(plan: Plan, *, only_repo: str) -> Plan:
     for label_ids in mr_label_ids_by_gitlab_mr_id.values():
         referenced_label_ids.update(label_ids)
 
-    labels = [
-        label for label in plan.labels if label.gitlab_label_id in referenced_label_ids
-    ]
+    labels = [label for label in plan.labels if label.gitlab_label_id in referenced_label_ids]
 
     member_usernames: set[str] = set()
     for members in org_members.values():
@@ -129,8 +160,7 @@ def _filter_plan_to_single_repo(plan: Plan, *, only_repo: str) -> Plan:
         for issue_id in sorted(issue_label_ids_by_gitlab_issue_id)
     }
     mr_label_ids_by_gitlab_mr_id_sorted = {
-        mr_id: mr_label_ids_by_gitlab_mr_id[mr_id]
-        for mr_id in sorted(mr_label_ids_by_gitlab_mr_id)
+        mr_id: mr_label_ids_by_gitlab_mr_id[mr_id] for mr_id in sorted(mr_label_ids_by_gitlab_mr_id)
     }
 
     return Plan(
@@ -168,6 +198,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--forgejo-url",
         default=_default_forgejo_url(),
         help="Forgejo base URL (default: FORGEJO_HTTP or http://localhost:$FORGEJO_HTTP_PORT)",
+    )
+    migrate.add_argument(
+        "--errors-log",
+        type=Path,
+        default=_default_errors_log_file(),
+        help="Path to write errors log (default: state/errors.log; can set FORGEJO_ERRORS_LOG)",
     )
     migrate.add_argument(
         "--only-repo",
@@ -221,6 +257,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "migrate":
+        _setup_logging(errors_log_path=args.errors_log.expanduser())
         backup_root: Path = args.backup.expanduser()
         token: str = args.token or _read_token_file(args.token_file.expanduser())
 

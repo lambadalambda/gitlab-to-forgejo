@@ -11,6 +11,22 @@ from gitlab_to_forgejo.plan_builder import MergeRequestPlan, OrgPlan, Plan, Repo
 
 
 class _BoomForgejo:
+    def __init__(self) -> None:
+        self.issue_numbers: list[int] = []
+
+    def create_issue(  # type: ignore[override]
+        self,
+        *,
+        owner: str,
+        repo: str,
+        title: str,
+        body: str,
+        sudo: str | None,
+    ) -> dict[str, object]:
+        number = 1234
+        self.issue_numbers.append(number)
+        return {"number": number}
+
     def create_pull_request(  # type: ignore[override]
         self,
         *,
@@ -82,8 +98,10 @@ def test_apply_merge_requests_logs_context_on_unhandled_forgejo_error(
 
     caplog.set_level(logging.ERROR, logger="gitlab_to_forgejo.migrator")
 
-    with pytest.raises(ForgejoError):
-        apply_merge_requests(plan, _BoomForgejo(), user_by_id={1: "alice"})
+    client = _BoomForgejo()
+    pr_numbers = apply_merge_requests(plan, client, user_by_id={1: "alice"})
+
+    assert pr_numbers == {123: 1234}
 
     assert "pleroma/pleroma-fe" in caplog.text
     assert "GitLab MR !7" in caplog.text

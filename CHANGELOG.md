@@ -33,6 +33,7 @@ The format is based on *Keep a Changelog*.
 - Forgejo DB post-processing (`src/gitlab_to_forgejo/forgejo_db.py`) to backfill historical issue/comment timestamps and issue open/closed state (including PR opening posts and MRs imported as issues).
 - Optional GitLab password hash migration: `--migrate-password-hashes` (or `FORGEJO_MIGRATE_PASSWORD_HASHES=1`) copies GitLab `users.encrypted_password` bcrypt hashes into Forgejo via direct DB update so users can keep their existing passwords (best-effort; GitLab password “pepper” setups may not be compatible).
 - Contextual error logging in the migrator (includes repo + GitLab IDs/branches) to make long-running failures easier to pinpoint.
+- Best-effort migration runs: the migrator continues on per-entity failures and writes errors to `state/errors.log` (override via `--errors-log` / `FORGEJO_ERRORS_LOG`).
 
 ### Fixed
 

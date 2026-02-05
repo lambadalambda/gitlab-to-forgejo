@@ -221,9 +221,8 @@ def _is_transient_target_not_found(err: ForgejoError) -> bool:
         return False
     msg = err.body.lower().replace(" ", "")
     return (
-        ("targetcouldn'tbefound" in msg or "targetcouldn\\u0027tbefound" in msg)
-        and '"errors":[]' in msg
-    )
+        "targetcouldn'tbefound" in msg or "targetcouldn\\u0027tbefound" in msg
+    ) and '"errors":[]' in msg
 
 
 def _is_missing_pull_request_base(err: ForgejoError) -> bool:
@@ -254,15 +253,48 @@ def apply_plan(plan: Plan, client: _ForgejoOps, *, user_password: str) -> dict[s
             forgejo_username_by_gitlab_username[user.username] = user.username
         except ForgejoError as err:
             if not _is_username_creation_error(err):
-                raise
+                logger.error(
+                    "Create user failed for gitlab user %s (id=%s) status=%s body=%r",
+                    user.username,
+                    user.gitlab_user_id,
+                    err.status_code,
+                    err.body,
+                )
+                continue
             fallback = _fallback_username(user.username, user.gitlab_user_id)
-            client.ensure_user(
-                username=fallback,
-                email=user.email,
-                full_name=user.full_name,
-                password=user_password,
+            try:
+                client.ensure_user(
+                    username=fallback,
+                    email=user.email,
+                    full_name=user.full_name,
+                    password=user_password,
+                )
+                forgejo_username_by_gitlab_username[user.username] = fallback
+            except ForgejoError as err2:
+                logger.error(
+                    "Create user failed for gitlab user %s (id=%s) fallback=%s status=%s body=%r",
+                    user.username,
+                    user.gitlab_user_id,
+                    fallback,
+                    err2.status_code,
+                    err2.body,
+                )
+                continue
+            except Exception:
+                logger.exception(
+                    "Create user failed for gitlab user %s (id=%s) fallback=%s",
+                    user.username,
+                    user.gitlab_user_id,
+                    fallback,
+                )
+                continue
+        except Exception:
+            logger.exception(
+                "Create user failed for gitlab user %s (id=%s)",
+                user.username,
+                user.gitlab_user_id,
             )
-            forgejo_username_by_gitlab_username[user.username] = fallback
+            continue
 
     forgejo_user_by_gitlab_user_id: dict[int, str] = {}
     for user in plan.users:
@@ -290,7 +322,19 @@ def apply_plan(plan: Plan, client: _ForgejoOps, *, user_password: str) -> dict[s
         add_interactor(note.gitlab_project_id, note.author_id)
 
     for org in plan.orgs:
-        client.ensure_org(org=org.name, full_name=org.full_path, description=org.description)
+        try:
+            client.ensure_org(org=org.name, full_name=org.full_path, description=org.description)
+        except ForgejoError as err:
+            logger.error(
+                "Create org failed for %s status=%s body=%r",
+                org.name,
+                err.status_code,
+                err.body,
+            )
+            continue
+        except Exception:
+            logger.exception("Create org failed for %s", org.name)
+            continue
 
     for org in plan.orgs:
         members = plan.org_members.get(org.name, {})
@@ -308,39 +352,151 @@ def apply_plan(plan: Plan, client: _ForgejoOps, *, user_password: str) -> dict[s
             reporters = sorted(set(reporters) | extra_reporters)
 
         if owners:
-            owner_team_id = client.get_owner_team_id(org.name)
-            for username in owners:
-                client.add_team_member(team_id=owner_team_id, username=username)
+            try:
+                owner_team_id = client.get_owner_team_id(org.name)
+            except ForgejoError as err:
+                logger.error(
+                    "Get owner team failed for org=%s status=%s body=%r",
+                    org.name,
+                    err.status_code,
+                    err.body,
+                )
+                owner_team_id = None
+            except Exception:
+                logger.exception("Get owner team failed for org=%s", org.name)
+                owner_team_id = None
+            if owner_team_id is not None:
+                for username in owners:
+                    try:
+                        client.add_team_member(team_id=owner_team_id, username=username)
+                    except ForgejoError as err:
+                        logger.error(
+                            "Add owner team member failed org=%s user=%s status=%s body=%r",
+                            org.name,
+                            username,
+                            err.status_code,
+                            err.body,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Add owner team member failed org=%s user=%s",
+                            org.name,
+                            username,
+                        )
 
         if maintainers:
-            team_id = client.ensure_team(
-                org=org.name,
-                name="Maintainers",
-                permission="admin",
-                includes_all_repositories=True,
-            )
-            for username in maintainers:
-                client.add_team_member(team_id=team_id, username=username)
+            try:
+                team_id = client.ensure_team(
+                    org=org.name,
+                    name="Maintainers",
+                    permission="admin",
+                    includes_all_repositories=True,
+                )
+            except ForgejoError as err:
+                logger.error(
+                    "Ensure team failed org=%s team=Maintainers status=%s body=%r",
+                    org.name,
+                    err.status_code,
+                    err.body,
+                )
+                team_id = None
+            except Exception:
+                logger.exception("Ensure team failed org=%s team=Maintainers", org.name)
+                team_id = None
+            if team_id is not None:
+                for username in maintainers:
+                    try:
+                        client.add_team_member(team_id=team_id, username=username)
+                    except ForgejoError as err:
+                        logger.error(
+                            "Add team member failed org=%s team=Maintainers user=%s status=%s body=%r",
+                            org.name,
+                            username,
+                            err.status_code,
+                            err.body,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Add team member failed org=%s team=Maintainers user=%s",
+                            org.name,
+                            username,
+                        )
 
         if developers:
-            team_id = client.ensure_team(
-                org=org.name,
-                name="Developers",
-                permission="write",
-                includes_all_repositories=True,
-            )
-            for username in developers:
-                client.add_team_member(team_id=team_id, username=username)
+            try:
+                team_id = client.ensure_team(
+                    org=org.name,
+                    name="Developers",
+                    permission="write",
+                    includes_all_repositories=True,
+                )
+            except ForgejoError as err:
+                logger.error(
+                    "Ensure team failed org=%s team=Developers status=%s body=%r",
+                    org.name,
+                    err.status_code,
+                    err.body,
+                )
+                team_id = None
+            except Exception:
+                logger.exception("Ensure team failed org=%s team=Developers", org.name)
+                team_id = None
+            if team_id is not None:
+                for username in developers:
+                    try:
+                        client.add_team_member(team_id=team_id, username=username)
+                    except ForgejoError as err:
+                        logger.error(
+                            "Add team member failed org=%s team=Developers user=%s status=%s body=%r",
+                            org.name,
+                            username,
+                            err.status_code,
+                            err.body,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Add team member failed org=%s team=Developers user=%s",
+                            org.name,
+                            username,
+                        )
 
         if reporters:
-            team_id = client.ensure_team(
-                org=org.name,
-                name="Reporters",
-                permission="read",
-                includes_all_repositories=True,
-            )
-            for username in reporters:
-                client.add_team_member(team_id=team_id, username=username)
+            try:
+                team_id = client.ensure_team(
+                    org=org.name,
+                    name="Reporters",
+                    permission="read",
+                    includes_all_repositories=True,
+                )
+            except ForgejoError as err:
+                logger.error(
+                    "Ensure team failed org=%s team=Reporters status=%s body=%r",
+                    org.name,
+                    err.status_code,
+                    err.body,
+                )
+                team_id = None
+            except Exception:
+                logger.exception("Ensure team failed org=%s team=Reporters", org.name)
+                team_id = None
+            if team_id is not None:
+                for username in reporters:
+                    try:
+                        client.add_team_member(team_id=team_id, username=username)
+                    except ForgejoError as err:
+                        logger.error(
+                            "Add team member failed org=%s team=Reporters user=%s status=%s body=%r",
+                            org.name,
+                            username,
+                            err.status_code,
+                            err.body,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Add team member failed org=%s team=Reporters user=%s",
+                            org.name,
+                            username,
+                        )
 
     return forgejo_username_by_gitlab_username
 
@@ -351,24 +507,41 @@ def apply_repos(plan: Plan, client: _ForgejoRepoOps, *, private: bool) -> None:
             default_branch = guess_default_branch(repo.refs_path)
         except (FileNotFoundError, ValueError):
             default_branch = None
-        client.ensure_org_repo(
-            org=repo.owner,
-            name=repo.name,
-            private=private,
-            default_branch=default_branch,
-        )
+        try:
+            client.ensure_org_repo(
+                org=repo.owner,
+                name=repo.name,
+                private=private,
+                default_branch=default_branch,
+            )
+        except ForgejoError as err:
+            logger.error(
+                "Create repo failed for %s/%s status=%s body=%r",
+                repo.owner,
+                repo.name,
+                err.status_code,
+                err.body,
+            )
+            continue
+        except Exception:
+            logger.exception("Create repo failed for %s/%s", repo.owner, repo.name)
+            continue
 
 
 def push_repos(plan: Plan, *, forgejo_url: str, git_username: str, git_token: str) -> None:
     base = forgejo_url.rstrip("/")
     for repo in plan.repos:
-        push_bundle_http(
-            bundle_path=repo.bundle_path,
-            refs_path=repo.refs_path,
-            remote_url=f"{base}/{repo.owner}/{repo.name}.git",
-            username=git_username,
-            token=git_token,
-        )
+        try:
+            push_bundle_http(
+                bundle_path=repo.bundle_path,
+                refs_path=repo.refs_path,
+                remote_url=f"{base}/{repo.owner}/{repo.name}.git",
+                username=git_username,
+                token=git_token,
+            )
+        except Exception:
+            logger.exception("Push repo failed for %s/%s", repo.owner, repo.name)
+            continue
 
 
 def push_wikis(plan: Plan, *, forgejo_url: str, git_username: str, git_token: str) -> None:
@@ -377,15 +550,23 @@ def push_wikis(plan: Plan, *, forgejo_url: str, git_username: str, git_token: st
         refspecs = list_wiki_push_refspecs(repo.wiki_refs_path)
         if not refspecs or not repo.wiki_bundle_path.exists():
             continue
-        ensure_wiki_repo_exists(owner=repo.owner, repo=repo.name)
-        push_bundle_http(
-            bundle_path=repo.wiki_bundle_path,
-            refs_path=repo.wiki_refs_path,
-            remote_url=f"{base}/{repo.owner}/{repo.name}.wiki.git",
-            username=git_username,
-            token=git_token,
-            refspecs=refspecs,
-        )
+        try:
+            ensure_wiki_repo_exists(owner=repo.owner, repo=repo.name)
+        except Exception:
+            logger.exception("Ensure wiki repo failed for %s/%s", repo.owner, repo.name)
+            continue
+        try:
+            push_bundle_http(
+                bundle_path=repo.wiki_bundle_path,
+                refs_path=repo.wiki_refs_path,
+                remote_url=f"{base}/{repo.owner}/{repo.name}.wiki.git",
+                username=git_username,
+                token=git_token,
+                refspecs=refspecs,
+            )
+        except Exception:
+            logger.exception("Push wiki failed for %s/%s", repo.owner, repo.name)
+            continue
 
 
 def push_merge_request_heads(
@@ -415,7 +596,7 @@ def push_merge_request_heads(
         if refs is None:
             try:
                 refs = read_ref_shas(repo.refs_path)
-            except FileNotFoundError:
+            except (FileNotFoundError, ValueError):
                 refs = {}
             refs_by_project_id[repo.gitlab_project_id] = refs
 
@@ -438,14 +619,18 @@ def push_merge_request_heads(
 
     for project_id, refspecs in refspecs_by_project_id.items():
         repo = repo_by_project_id[project_id]
-        push_bundle_http(
-            bundle_path=repo.bundle_path,
-            refs_path=repo.refs_path,
-            remote_url=f"{base}/{repo.owner}/{repo.name}.git",
-            username=git_username,
-            token=git_token,
-            refspecs=sorted(set(refspecs)),
-        )
+        try:
+            push_bundle_http(
+                bundle_path=repo.bundle_path,
+                refs_path=repo.refs_path,
+                remote_url=f"{base}/{repo.owner}/{repo.name}.git",
+                username=git_username,
+                token=git_token,
+                refspecs=sorted(set(refspecs)),
+            )
+        except Exception:
+            logger.exception("Push merge request branches failed for %s/%s", repo.owner, repo.name)
+            continue
 
 
 def apply_issues(
@@ -457,7 +642,8 @@ def apply_issues(
     for issue in plan.issues:
         repo = repo_by_project_id.get(issue.gitlab_project_id)
         if repo is None:
-            raise ValueError(f"no repo found for issue project_id={issue.gitlab_project_id}")
+            logger.error("No repo found for issue project_id=%s", issue.gitlab_project_id)
+            continue
 
         sudo = user_by_id.get(issue.author_id)
         try:
@@ -479,7 +665,17 @@ def apply_issues(
                 err.status_code,
                 err.body,
             )
-            raise
+            continue
+        except Exception:
+            logger.exception(
+                "Create issue failed for %s/%s GitLab issue #%s (id=%s) sudo=%s",
+                repo.owner,
+                repo.name,
+                issue.gitlab_issue_iid,
+                issue.gitlab_issue_id,
+                sudo,
+            )
+            continue
         number = int(resp["number"])
         issue_number_by_gitlab_issue_id[issue.gitlab_issue_id] = number
 
@@ -496,15 +692,14 @@ def apply_merge_requests(
     for mr in plan.merge_requests:
         repo = repo_by_project_id.get(mr.gitlab_target_project_id)
         if repo is None:
-            raise ValueError(
-                f"no repo found for mr target_project_id={mr.gitlab_target_project_id}"
-            )
+            logger.error("No repo found for mr target_project_id=%s", mr.gitlab_target_project_id)
+            continue
 
         refs = refs_by_project_id.get(repo.gitlab_project_id)
         if refs is None:
             try:
                 refs = read_ref_shas(repo.refs_path)
-            except FileNotFoundError:
+            except (FileNotFoundError, ValueError):
                 refs = {}
             refs_by_project_id[repo.gitlab_project_id] = refs
 
@@ -526,15 +721,38 @@ def apply_merge_requests(
                     ),
                 ]
             ).strip()
-            resp = client.create_issue(
-                owner=repo.owner,
-                repo=repo.name,
-                title=f"MR: {mr.title}",
-                body=body,
-                sudo=user_by_id.get(mr.author_id),
-            )
-            number = int(resp["number"])
-            pr_number_by_gitlab_mr_id[mr.gitlab_mr_id] = number
+            sudo = user_by_id.get(mr.author_id)
+            try:
+                resp = client.create_issue(
+                    owner=repo.owner,
+                    repo=repo.name,
+                    title=f"MR: {mr.title}",
+                    body=body,
+                    sudo=sudo,
+                )
+                number = int(resp["number"])
+                pr_number_by_gitlab_mr_id[mr.gitlab_mr_id] = number
+            except ForgejoError as err:
+                logger.error(
+                    "Create MR issue fallback failed for %s/%s GitLab MR !%s (id=%s) "
+                    "sudo=%s status=%s body=%r",
+                    repo.owner,
+                    repo.name,
+                    mr.gitlab_mr_iid,
+                    mr.gitlab_mr_id,
+                    sudo,
+                    err.status_code,
+                    err.body,
+                )
+            except Exception:
+                logger.exception(
+                    "Create MR issue fallback failed for %s/%s GitLab MR !%s (id=%s) sudo=%s",
+                    repo.owner,
+                    repo.name,
+                    mr.gitlab_mr_iid,
+                    mr.gitlab_mr_id,
+                    sudo,
+                )
             continue
 
         synthetic_base_branch = f"gitlab-mr-base-iid-{mr.gitlab_mr_iid}"
@@ -559,20 +777,44 @@ def apply_merge_requests(
                     ),
                 ]
             ).strip()
-            resp = client.create_issue(
-                owner=repo.owner,
-                repo=repo.name,
-                title=f"MR: {mr.title}",
-                body=body,
-                sudo=user_by_id.get(mr.author_id),
-            )
-            number = int(resp["number"])
-            pr_number_by_gitlab_mr_id[mr.gitlab_mr_id] = number
+            sudo = user_by_id.get(mr.author_id)
+            try:
+                resp = client.create_issue(
+                    owner=repo.owner,
+                    repo=repo.name,
+                    title=f"MR: {mr.title}",
+                    body=body,
+                    sudo=sudo,
+                )
+                number = int(resp["number"])
+                pr_number_by_gitlab_mr_id[mr.gitlab_mr_id] = number
+            except ForgejoError as err:
+                logger.error(
+                    "Create MR issue fallback failed for %s/%s GitLab MR !%s (id=%s) "
+                    "sudo=%s status=%s body=%r",
+                    repo.owner,
+                    repo.name,
+                    mr.gitlab_mr_iid,
+                    mr.gitlab_mr_id,
+                    sudo,
+                    err.status_code,
+                    err.body,
+                )
+            except Exception:
+                logger.exception(
+                    "Create MR issue fallback failed for %s/%s GitLab MR !%s (id=%s) sudo=%s",
+                    repo.owner,
+                    repo.name,
+                    mr.gitlab_mr_iid,
+                    mr.gitlab_mr_id,
+                    sudo,
+                )
             continue
 
         delays = (0.2, 0.5, 1.0)
         resp: Mapping[str, object] | None = None
         created_issue = False
+        sudo = user_by_id.get(mr.author_id)
         for attempt in range(len(delays) + 1):
             try:
                 resp = client.create_pull_request(
@@ -582,7 +824,7 @@ def apply_merge_requests(
                     body=mr.description,
                     head=head,
                     base=base,
-                    sudo=user_by_id.get(mr.author_id),
+                    sudo=sudo,
                 )
                 break
             except ForgejoError as err:
@@ -605,15 +847,37 @@ def apply_merge_requests(
                             ),
                         ]
                     ).strip()
-                    issue_resp = client.create_issue(
-                        owner=repo.owner,
-                        repo=repo.name,
-                        title=f"MR: {mr.title}",
-                        body=issue_body,
-                        sudo=user_by_id.get(mr.author_id),
-                    )
-                    pr_number_by_gitlab_mr_id[mr.gitlab_mr_id] = int(issue_resp["number"])
-                    created_issue = True
+                    try:
+                        issue_resp = client.create_issue(
+                            owner=repo.owner,
+                            repo=repo.name,
+                            title=f"MR: {mr.title}",
+                            body=issue_body,
+                            sudo=sudo,
+                        )
+                        pr_number_by_gitlab_mr_id[mr.gitlab_mr_id] = int(issue_resp["number"])
+                        created_issue = True
+                    except ForgejoError as err2:
+                        logger.error(
+                            "Create MR issue fallback failed for %s/%s GitLab MR !%s (id=%s) "
+                            "sudo=%s status=%s body=%r",
+                            repo.owner,
+                            repo.name,
+                            mr.gitlab_mr_iid,
+                            mr.gitlab_mr_id,
+                            sudo,
+                            err2.status_code,
+                            err2.body,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Create MR issue fallback failed for %s/%s GitLab MR !%s (id=%s) sudo=%s",
+                            repo.owner,
+                            repo.name,
+                            mr.gitlab_mr_iid,
+                            mr.gitlab_mr_id,
+                            sudo,
+                        )
                     break
                 if _is_no_changes_between_head_and_base(err):
                     issue_body = "\n".join(
@@ -631,18 +895,39 @@ def apply_merge_requests(
                             ),
                         ]
                     ).strip()
-                    issue_resp = client.create_issue(
-                        owner=repo.owner,
-                        repo=repo.name,
-                        title=f"MR: {mr.title}",
-                        body=issue_body,
-                        sudo=user_by_id.get(mr.author_id),
-                    )
-                    pr_number_by_gitlab_mr_id[mr.gitlab_mr_id] = int(issue_resp["number"])
-                    created_issue = True
+                    try:
+                        issue_resp = client.create_issue(
+                            owner=repo.owner,
+                            repo=repo.name,
+                            title=f"MR: {mr.title}",
+                            body=issue_body,
+                            sudo=sudo,
+                        )
+                        pr_number_by_gitlab_mr_id[mr.gitlab_mr_id] = int(issue_resp["number"])
+                        created_issue = True
+                    except ForgejoError as err2:
+                        logger.error(
+                            "Create MR issue fallback failed for %s/%s GitLab MR !%s (id=%s) "
+                            "sudo=%s status=%s body=%r",
+                            repo.owner,
+                            repo.name,
+                            mr.gitlab_mr_iid,
+                            mr.gitlab_mr_id,
+                            sudo,
+                            err2.status_code,
+                            err2.body,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Create MR issue fallback failed for %s/%s GitLab MR !%s (id=%s) sudo=%s",
+                            repo.owner,
+                            repo.name,
+                            mr.gitlab_mr_iid,
+                            mr.gitlab_mr_id,
+                            sudo,
+                        )
                     break
                 if not _is_transient_target_not_found(err) or attempt >= len(delays):
-                    sudo = user_by_id.get(mr.author_id)
                     logger.error(
                         "Create PR failed for %s/%s GitLab MR !%s (id=%s) "
                         "head=%s base=%s sudo=%s status=%s body=%r",
@@ -656,13 +941,120 @@ def apply_merge_requests(
                         err.status_code,
                         err.body,
                     )
-                    raise
+                    issue_body = "\n".join(
+                        [
+                            mr.description,
+                            "",
+                            (
+                                f"_Imported from GitLab MR !{mr.gitlab_mr_iid} "
+                                f"({mr.source_branch} → {mr.target_branch})_"
+                            ),
+                            "",
+                            ("_Forgejo pull request not created because PR creation failed._"),
+                            "",
+                            f"- head: `{head}`",
+                            f"- base: `{base}`",
+                            f"- error: {err.status_code} {err.body}",
+                        ]
+                    ).strip()
+                    try:
+                        issue_resp = client.create_issue(
+                            owner=repo.owner,
+                            repo=repo.name,
+                            title=f"MR: {mr.title}",
+                            body=issue_body,
+                            sudo=sudo,
+                        )
+                        pr_number_by_gitlab_mr_id[mr.gitlab_mr_id] = int(issue_resp["number"])
+                    except ForgejoError as err2:
+                        logger.error(
+                            "Create MR issue fallback failed for %s/%s GitLab MR !%s (id=%s) "
+                            "sudo=%s status=%s body=%r",
+                            repo.owner,
+                            repo.name,
+                            mr.gitlab_mr_iid,
+                            mr.gitlab_mr_id,
+                            sudo,
+                            err2.status_code,
+                            err2.body,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Create MR issue fallback failed for %s/%s GitLab MR !%s (id=%s) sudo=%s",
+                            repo.owner,
+                            repo.name,
+                            mr.gitlab_mr_iid,
+                            mr.gitlab_mr_id,
+                            sudo,
+                        )
+                    created_issue = True
+                    break
                 time.sleep(delays[attempt])
+            except Exception as exc:
+                logger.exception(
+                    "Create PR failed for %s/%s GitLab MR !%s (id=%s) head=%s base=%s sudo=%s",
+                    repo.owner,
+                    repo.name,
+                    mr.gitlab_mr_iid,
+                    mr.gitlab_mr_id,
+                    head,
+                    base,
+                    sudo,
+                )
+                issue_body = "\n".join(
+                    [
+                        mr.description,
+                        "",
+                        (
+                            f"_Imported from GitLab MR !{mr.gitlab_mr_iid} "
+                            f"({mr.source_branch} → {mr.target_branch})_"
+                        ),
+                        "",
+                        "_Forgejo pull request not created because PR creation raised an error._",
+                        "",
+                        f"- head: `{head}`",
+                        f"- base: `{base}`",
+                        f"- error: `{exc!r}`",
+                    ]
+                ).strip()
+                try:
+                    issue_resp = client.create_issue(
+                        owner=repo.owner,
+                        repo=repo.name,
+                        title=f"MR: {mr.title}",
+                        body=issue_body,
+                        sudo=sudo,
+                    )
+                    pr_number_by_gitlab_mr_id[mr.gitlab_mr_id] = int(issue_resp["number"])
+                except ForgejoError as err2:
+                    logger.error(
+                        "Create MR issue fallback failed for %s/%s GitLab MR !%s (id=%s) "
+                        "sudo=%s status=%s body=%r",
+                        repo.owner,
+                        repo.name,
+                        mr.gitlab_mr_iid,
+                        mr.gitlab_mr_id,
+                        sudo,
+                        err2.status_code,
+                        err2.body,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Create MR issue fallback failed for %s/%s GitLab MR !%s (id=%s) sudo=%s",
+                        repo.owner,
+                        repo.name,
+                        mr.gitlab_mr_iid,
+                        mr.gitlab_mr_id,
+                        sudo,
+                    )
+                created_issue = True
+                break
 
         if created_issue:
             continue
 
-        assert resp is not None
+        if resp is None:
+            continue
         number = int(resp["number"])
         pr_number_by_gitlab_mr_id[mr.gitlab_mr_id] = number
 
@@ -683,7 +1075,8 @@ def apply_notes(
     for note in plan.notes:
         repo = repo_by_project_id.get(note.gitlab_project_id)
         if repo is None:
-            raise ValueError(f"no repo found for note project_id={note.gitlab_project_id}")
+            logger.error("No repo found for note project_id=%s", note.gitlab_project_id)
+            continue
 
         issue_number: int | None
         if note.noteable_type == "Issue":
@@ -719,7 +1112,19 @@ def apply_notes(
                 err.status_code,
                 err.body,
             )
-            raise
+            continue
+        except Exception:
+            logger.exception(
+                "Create comment failed for %s/%s GitLab note %s on %s %s (forgejo issue/pr #%s) sudo=%s",
+                repo.owner,
+                repo.name,
+                note.gitlab_note_id,
+                note.noteable_type,
+                note.noteable_id,
+                issue_number,
+                sudo,
+            )
+            continue
         comment_id_raw = resp.get("id")
         if comment_id_raw is not None:
             comment_id_by_gitlab_note_id[note.gitlab_note_id] = int(comment_id_raw)
@@ -747,9 +1152,8 @@ def apply_issue_and_pr_uploads(
             continue
         repo = repo_by_project_id.get(issue.gitlab_project_id)
         if repo is None:
-            raise ValueError(
-                f"no repo found for issue uploads project_id={issue.gitlab_project_id}"
-            )
+            logger.error("No repo found for issue uploads project_id=%s", issue.gitlab_project_id)
+            continue
 
         sudo = user_by_id.get(issue.author_id)
         mapping: dict[str, str] = {}
@@ -788,7 +1192,18 @@ def apply_issue_and_pr_uploads(
                     err.status_code,
                     err.body,
                 )
-                raise
+                continue
+            except Exception:
+                logger.exception(
+                    "Create issue attachment failed for %s/%s GitLab issue #%s (id=%s) filename=%s sudo=%s",
+                    repo.owner,
+                    repo.name,
+                    issue.gitlab_issue_iid,
+                    issue.gitlab_issue_id,
+                    filename,
+                    sudo,
+                )
+                continue
             new_url = resp.get("browser_download_url")
             if new_url:
                 mapping[url] = str(new_url)
@@ -819,7 +1234,18 @@ def apply_issue_and_pr_uploads(
                 err.status_code,
                 err.body,
             )
-            raise
+            continue
+        except Exception:
+            logger.exception(
+                "Edit issue body failed for %s/%s GitLab issue #%s (id=%s) forgejo issue #%s sudo=%s",
+                repo.owner,
+                repo.name,
+                issue.gitlab_issue_iid,
+                issue.gitlab_issue_id,
+                issue_number,
+                sudo,
+            )
+            continue
 
     for mr in plan.merge_requests:
         pr_number = pr_number_by_gitlab_mr_id.get(mr.gitlab_mr_id)
@@ -827,9 +1253,11 @@ def apply_issue_and_pr_uploads(
             continue
         repo = repo_by_project_id.get(mr.gitlab_target_project_id)
         if repo is None:
-            raise ValueError(
-                f"no repo found for merge request uploads project_id={mr.gitlab_target_project_id}"
+            logger.error(
+                "No repo found for merge request uploads project_id=%s",
+                mr.gitlab_target_project_id,
             )
+            continue
 
         sudo = user_by_id.get(mr.author_id)
         mapping: dict[str, str] = {}
@@ -868,7 +1296,18 @@ def apply_issue_and_pr_uploads(
                     err.status_code,
                     err.body,
                 )
-                raise
+                continue
+            except Exception:
+                logger.exception(
+                    "Create PR attachment failed for %s/%s GitLab MR !%s (id=%s) filename=%s sudo=%s",
+                    repo.owner,
+                    repo.name,
+                    mr.gitlab_mr_iid,
+                    mr.gitlab_mr_id,
+                    filename,
+                    sudo,
+                )
+                continue
             new_url = resp.get("browser_download_url")
             if new_url:
                 mapping[url] = str(new_url)
@@ -902,7 +1341,18 @@ def apply_issue_and_pr_uploads(
                 err.status_code,
                 err.body,
             )
-            raise
+            continue
+        except Exception:
+            logger.exception(
+                "Edit PR body failed for %s/%s GitLab MR !%s (id=%s) forgejo pr #%s sudo=%s",
+                repo.owner,
+                repo.name,
+                mr.gitlab_mr_iid,
+                mr.gitlab_mr_id,
+                pr_number,
+                sudo,
+            )
+            continue
 
 
 def apply_note_uploads(
@@ -925,7 +1375,8 @@ def apply_note_uploads(
 
         repo = repo_by_project_id.get(note.gitlab_project_id)
         if repo is None:
-            raise ValueError(f"no repo found for note uploads project_id={note.gitlab_project_id}")
+            logger.error("No repo found for note uploads project_id=%s", note.gitlab_project_id)
+            continue
 
         sudo = user_by_id.get(note.author_id)
         attachment_sudo = sudo
@@ -965,7 +1416,7 @@ def apply_note_uploads(
                         err.status_code,
                         err.body,
                     )
-                    raise
+                    continue
                 attachment_sudo = None
                 try:
                     resp = client.create_issue_comment_attachment(
@@ -988,7 +1439,27 @@ def apply_note_uploads(
                         err.status_code,
                         err.body,
                     )
-                    raise
+                    continue
+                except Exception:
+                    logger.exception(
+                        "Create comment attachment failed for %s/%s GitLab note %s filename=%s sudo=%s",
+                        repo.owner,
+                        repo.name,
+                        note.gitlab_note_id,
+                        filename,
+                        attachment_sudo,
+                    )
+                    continue
+            except Exception:
+                logger.exception(
+                    "Create comment attachment failed for %s/%s GitLab note %s filename=%s sudo=%s",
+                    repo.owner,
+                    repo.name,
+                    note.gitlab_note_id,
+                    filename,
+                    attachment_sudo,
+                )
+                continue
             new_url = resp.get("browser_download_url")
             if new_url:
                 mapping[url] = str(new_url)
@@ -1018,7 +1489,17 @@ def apply_note_uploads(
                 err.status_code,
                 err.body,
             )
-            raise
+            continue
+        except Exception:
+            logger.exception(
+                "Edit comment body failed for %s/%s GitLab note %s forgejo comment %s sudo=%s",
+                repo.owner,
+                repo.name,
+                note.gitlab_note_id,
+                comment_id,
+                sudo,
+            )
+            continue
 
 
 def collect_project_uploads(plan: Plan) -> set[GitLabProjectUpload]:
@@ -1076,13 +1557,32 @@ def apply_user_avatars(plan: Plan, client: _ForgejoOps, *, user_by_id: Mapping[i
     if not desired:
         return
 
-    avatar_bytes = read_user_avatars_from_uploads(uploads, desired=desired)
+    try:
+        avatar_bytes = read_user_avatars_from_uploads(uploads, desired=desired)
+    except Exception:
+        logger.exception("Read user avatars from uploads.tar.gz failed")
+        return
     for user_id, raw in sorted(avatar_bytes.items()):
         sudo = user_by_id.get(user_id)
         if not sudo:
             continue
         image_b64 = base64.b64encode(raw).decode("ascii")
-        client.update_user_avatar(image_b64=image_b64, sudo=sudo)
+        try:
+            client.update_user_avatar(image_b64=image_b64, sudo=sudo)
+        except ForgejoError as err:
+            logger.error(
+                "Update user avatar failed for gitlab user id=%s sudo=%s status=%s body=%r",
+                user_id,
+                sudo,
+                err.status_code,
+                err.body,
+            )
+            continue
+        except Exception:
+            logger.exception(
+                "Update user avatar failed for gitlab user id=%s sudo=%s", user_id, sudo
+            )
+            continue
 
 
 def ensure_repo_labels(plan: Plan, client: _ForgejoRepoOps) -> None:
@@ -1106,12 +1606,26 @@ def ensure_repo_labels(plan: Plan, client: _ForgejoRepoOps) -> None:
     for project_id, label_ids in sorted(label_ids_by_project.items()):
         repo = repo_by_project_id.get(project_id)
         if repo is None:
-            raise ValueError(f"no repo found for labels project_id={project_id}")
+            logger.error("No repo found for labels project_id=%s", project_id)
+            continue
 
-        existing_by_name = {
-            str(label_obj.get("name") or ""): label_obj
-            for label_obj in client.list_repo_labels(owner=repo.owner, repo=repo.name)
-        }
+        try:
+            existing_by_name = {
+                str(label_obj.get("name") or ""): label_obj
+                for label_obj in client.list_repo_labels(owner=repo.owner, repo=repo.name)
+            }
+        except ForgejoError as err:
+            logger.error(
+                "List repo labels failed for %s/%s status=%s body=%r",
+                repo.owner,
+                repo.name,
+                err.status_code,
+                err.body,
+            )
+            continue
+        except Exception:
+            logger.exception("List repo labels failed for %s/%s", repo.owner, repo.name)
+            continue
 
         def sort_key(label_id: int) -> tuple[str, int]:
             label = label_by_id.get(label_id)
@@ -1123,13 +1637,32 @@ def ensure_repo_labels(plan: Plan, client: _ForgejoRepoOps) -> None:
                 continue
             if label.title in existing_by_name:
                 continue
-            client.create_repo_label(
-                owner=repo.owner,
-                repo=repo.name,
-                name=label.title,
-                color=label.color,
-                description=label.description,
-            )
+            try:
+                client.create_repo_label(
+                    owner=repo.owner,
+                    repo=repo.name,
+                    name=label.title,
+                    color=label.color,
+                    description=label.description,
+                )
+            except ForgejoError as err:
+                logger.error(
+                    "Create repo label failed for %s/%s label=%s status=%s body=%r",
+                    repo.owner,
+                    repo.name,
+                    label.title,
+                    err.status_code,
+                    err.body,
+                )
+                continue
+            except Exception:
+                logger.exception(
+                    "Create repo label failed for %s/%s label=%s",
+                    repo.owner,
+                    repo.name,
+                    label.title,
+                )
+                continue
 
 
 def apply_issue_and_mr_labels(
@@ -1166,14 +1699,36 @@ def apply_issue_and_mr_labels(
             continue
         repo = repo_by_project_id.get(issue.gitlab_project_id)
         if repo is None:
-            raise ValueError(f"no repo found for issue labels project_id={issue.gitlab_project_id}")
-        client.replace_issue_labels(
-            owner=repo.owner,
-            repo=repo.name,
-            issue_number=issue_number,
-            labels=names,
-            sudo=None,
-        )
+            logger.error("No repo found for issue labels project_id=%s", issue.gitlab_project_id)
+            continue
+        try:
+            client.replace_issue_labels(
+                owner=repo.owner,
+                repo=repo.name,
+                issue_number=issue_number,
+                labels=names,
+                sudo=None,
+            )
+        except ForgejoError as err:
+            logger.error(
+                "Apply issue labels failed for %s/%s GitLab issue #%s (id=%s) status=%s body=%r",
+                repo.owner,
+                repo.name,
+                issue.gitlab_issue_iid,
+                issue.gitlab_issue_id,
+                err.status_code,
+                err.body,
+            )
+            continue
+        except Exception:
+            logger.exception(
+                "Apply issue labels failed for %s/%s GitLab issue #%s (id=%s)",
+                repo.owner,
+                repo.name,
+                issue.gitlab_issue_iid,
+                issue.gitlab_issue_id,
+            )
+            continue
 
     for mr in plan.merge_requests:
         pr_number = pr_number_by_gitlab_mr_id.get(mr.gitlab_mr_id)
@@ -1187,16 +1742,38 @@ def apply_issue_and_mr_labels(
             continue
         repo = repo_by_project_id.get(mr.gitlab_target_project_id)
         if repo is None:
-            raise ValueError(
-                f"no repo found for merge request labels project_id={mr.gitlab_target_project_id}"
+            logger.error(
+                "No repo found for merge request labels project_id=%s", mr.gitlab_target_project_id
             )
-        client.replace_issue_labels(
-            owner=repo.owner,
-            repo=repo.name,
-            issue_number=pr_number,
-            labels=names,
-            sudo=None,
-        )
+            continue
+        try:
+            client.replace_issue_labels(
+                owner=repo.owner,
+                repo=repo.name,
+                issue_number=pr_number,
+                labels=names,
+                sudo=None,
+            )
+        except ForgejoError as err:
+            logger.error(
+                "Apply MR labels failed for %s/%s GitLab MR !%s (id=%s) status=%s body=%r",
+                repo.owner,
+                repo.name,
+                mr.gitlab_mr_iid,
+                mr.gitlab_mr_id,
+                err.status_code,
+                err.body,
+            )
+            continue
+        except Exception:
+            logger.exception(
+                "Apply MR labels failed for %s/%s GitLab MR !%s (id=%s)",
+                repo.owner,
+                repo.name,
+                mr.gitlab_mr_iid,
+                mr.gitlab_mr_id,
+            )
+            continue
 
 
 def migrate_plan(
@@ -1223,15 +1800,22 @@ def migrate_plan(
             forgejo_username_by_gitlab_username=forgejo_username_by_gitlab_username,
             skip_forgejo_usernames={"root", git_username},
         )
-        apply_metadata_fix_sql(sql)
+        try:
+            apply_metadata_fix_sql(sql)
+        except Exception:
+            logger.exception("Apply password hash migration SQL failed")
 
     upload_bytes_by_upload: dict[GitLabProjectUpload, bytes] = {}
     if plan.uploads_tar_path is not None:
         desired_uploads = collect_project_uploads(plan)
         if desired_uploads:
-            upload_bytes_by_upload = read_project_uploads_from_uploads(
-                plan.uploads_tar_path, desired=desired_uploads
-            )
+            try:
+                upload_bytes_by_upload = read_project_uploads_from_uploads(
+                    plan.uploads_tar_path, desired=desired_uploads
+                )
+            except Exception:
+                logger.exception("Read project uploads from uploads.tar.gz failed")
+                upload_bytes_by_upload = {}
 
     apply_user_avatars(plan, client, user_by_id=forgejo_user_by_gitlab_user_id)
 
@@ -1279,4 +1863,7 @@ def migrate_plan(
         pr_number_by_gitlab_mr_id=pr_numbers,
         comment_id_by_gitlab_note_id=comment_ids,
     )
-    apply_metadata_fix_sql(sql)
+    try:
+        apply_metadata_fix_sql(sql)
+    except Exception:
+        logger.exception("Apply metadata fix SQL failed")

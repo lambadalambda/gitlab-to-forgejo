@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from unittest.mock import patch
 
@@ -120,6 +121,39 @@ def test_cli_migrate_supports_only_repo_filter(tmp_path: Path) -> None:
     assert {i.gitlab_project_id for i in plan.issues} == {673}
     assert {mr.gitlab_target_project_id for mr in plan.merge_requests} == {673}
     assert {n.gitlab_project_id for n in plan.notes} == {673}
+
+
+def test_cli_migrate_writes_errors_log(tmp_path: Path) -> None:
+    token_file = tmp_path / "token"
+    token_file.write_text("t0\n", encoding="utf-8")
+
+    errors_log = tmp_path / "errors.log"
+
+    def _fake_migrate_plan(*args: object, **kwargs: object) -> None:
+        logging.getLogger("gitlab_to_forgejo.migrator").error("boom from migrate_plan")
+
+    with (
+        patch("gitlab_to_forgejo.cli.migrate_plan", side_effect=_fake_migrate_plan),
+        patch("gitlab_to_forgejo.cli.ForgejoClient"),
+    ):
+        rc = cli.main(
+            [
+                "migrate",
+                "--backup",
+                str(_fixture_backup_root()),
+                "--root-group",
+                "pleroma",
+                "--forgejo-url",
+                "http://example.test",
+                "--token-file",
+                str(token_file),
+                "--errors-log",
+                str(errors_log),
+            ]
+        )
+
+    assert rc == 0
+    assert "boom from migrate_plan" in errors_log.read_text(encoding="utf-8")
 
 
 def test_filter_plan_to_single_repo_filters_labels_and_keeps_uploads_path(tmp_path: Path) -> None:

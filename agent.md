@@ -5,6 +5,7 @@
 - **TDD first**: write/adjust tests before implementation for any new behavior.
 - **Fixtures come from the real backup** at `~/pleromagit-backup`, but keep committed fixtures **small** (hand-picked subset).
 - **Repeatable migration**: a clean-slate run (fresh Forgejo volumes) must produce the same result deterministically.
+- **Best-effort runs**: migrations should continue on per-entity failures; log errors to the terminal and to `state/errors.log` (override via `--errors-log` / `FORGEJO_ERRORS_LOG`) so long runs can be debugged after the fact.
 - **Small, topical commits**: one concern per commit; update `CHANGELOG.md` with each commit.
 - **Historical correctness**: issue open/closed state and timestamps (issues + comments) must match GitLab; if Forgejo’s API can’t set them, use DB post-processing.
 - **Passwords**: default is a single known `--user-password` for created users (dev-friendly). If you need to preserve GitLab passwords, enable `--migrate-password-hashes` / `FORGEJO_MIGRATE_PASSWORD_HASHES=1` to copy GitLab bcrypt hashes into Forgejo via direct DB update (best-effort; may be incompatible with GitLab “pepper” setups).
