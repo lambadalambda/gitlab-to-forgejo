@@ -46,6 +46,17 @@ If ports are already in use, override with:
 
 - `FORGEJO_HTTP_PORT=3001 FORGEJO_SSH_PORT=2223 mise run up`
 
+## Performance notes
+
+Import performance depends heavily on the Forgejo instance configuration. By default this repo starts Forgejo in a migration-friendly mode:
+
+- `FORGEJO__queue__TYPE=channel` (in-memory queues; faster than disk-backed `level` queues)
+- `FORGEJO__indexer__ISSUE_INDEXER_TYPE=db` (avoid Bleve indexing overhead during import)
+
+To override (e.g. to enable Bleve issue search after import), restart Forgejo with:
+
+- `FORGEJO_QUEUE_TYPE=level FORGEJO_ISSUE_INDEXER_TYPE=bleve mise run up`
+
 ## Forgejo login
 
 - URL: `http://localhost:${FORGEJO_HTTP_PORT:-3000}`

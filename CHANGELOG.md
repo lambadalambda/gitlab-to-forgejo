@@ -51,3 +51,4 @@ The format is based on *Keep a Changelog*.
 - MR import no longer crashes when the GitLab target branch is missing from the backup; the migrator uses `merge_request_diffs.base_commit_sha` as the PR base when available, otherwise falls back to importing the MR as an issue.
 - MR import no longer triggers Forgejo 500s when targeting a missing base branch: the migrator now pushes a synthetic base branch `gitlab-mr-base-iid-<iid>` pointing at `merge_request_diffs.base_commit_sha` and uses that as the PR base.
 - MR import no longer fails with Forgejo 409 "pull request already exists for these targets" when GitLab reuses branch names: the migrator now prefers per-MR synthetic head branches `gitlab-mr-iid-<iid>` sourced from `merge_request_diffs.head_commit_sha` or `refs/merge-requests/<iid>/head` when available.
+- Docker Compose now defaults to migration-friendly Forgejo settings (`queue.TYPE=channel`, `indexer.ISSUE_INDEXER_TYPE=db`) to speed up large imports.

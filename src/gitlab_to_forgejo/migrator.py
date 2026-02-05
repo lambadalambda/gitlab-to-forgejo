@@ -40,11 +40,27 @@ def _phase(name: str) -> Iterator[None]:
         logger.info("<== %s (%.1fs)", name, elapsed)
 
 
-def _progress_step(total: int, *, target_messages: int = 20, min_step: int = 25) -> int:
+def _progress_step(total: int, *, target_messages: int = 50, min_step: int = 25) -> int:
     if total <= 0:
         return 1
     step = max(1, total // target_messages)
     return max(min_step, step)
+
+
+def _format_duration(seconds: float) -> str:
+    if seconds <= 0:
+        return "0s"
+    total = int(round(seconds))
+    parts: list[str] = []
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes:
+        parts.append(f"{minutes}m")
+    if secs or not parts:
+        parts.append(f"{secs}s")
+    return "".join(parts)
 
 
 class _ForgejoOps(Protocol):
@@ -672,10 +688,20 @@ def apply_issues(
     if total:
         logger.info("Importing issues (%d)", total)
     step = _progress_step(total)
+    started = time.monotonic()
 
     for idx, issue in enumerate(plan.issues, start=1):
         if total and (idx == 1 or idx % step == 0 or idx == total):
-            logger.info("Issues progress: %d/%d", idx, total)
+            elapsed = time.monotonic() - started
+            avg = elapsed / idx if idx else 0.0
+            eta = avg * (total - idx)
+            logger.info(
+                "Issues progress: %d/%d (avg %.2fs, eta %s)",
+                idx,
+                total,
+                avg,
+                _format_duration(eta),
+            )
         repo = repo_by_project_id.get(issue.gitlab_project_id)
         if repo is None:
             logger.error("No repo found for issue project_id=%s", issue.gitlab_project_id)
@@ -729,10 +755,20 @@ def apply_merge_requests(
     if total:
         logger.info("Importing merge requests (%d)", total)
     step = _progress_step(total)
+    started = time.monotonic()
 
     for idx, mr in enumerate(plan.merge_requests, start=1):
         if total and (idx == 1 or idx % step == 0 or idx == total):
-            logger.info("Merge requests progress: %d/%d", idx, total)
+            elapsed = time.monotonic() - started
+            avg = elapsed / idx if idx else 0.0
+            eta = avg * (total - idx)
+            logger.info(
+                "Merge requests progress: %d/%d (avg %.2fs, eta %s)",
+                idx,
+                total,
+                avg,
+                _format_duration(eta),
+            )
         repo = repo_by_project_id.get(mr.gitlab_target_project_id)
         if repo is None:
             logger.error("No repo found for mr target_project_id=%s", mr.gitlab_target_project_id)
@@ -1118,10 +1154,20 @@ def apply_notes(
     if total:
         logger.info("Importing notes/comments (%d)", total)
     step = _progress_step(total, min_step=100)
+    started = time.monotonic()
 
     for idx, note in enumerate(plan.notes, start=1):
         if total and (idx == 1 or idx % step == 0 or idx == total):
-            logger.info("Notes progress: %d/%d", idx, total)
+            elapsed = time.monotonic() - started
+            avg = elapsed / idx if idx else 0.0
+            eta = avg * (total - idx)
+            logger.info(
+                "Notes progress: %d/%d (avg %.2fs, eta %s)",
+                idx,
+                total,
+                avg,
+                _format_duration(eta),
+            )
         repo = repo_by_project_id.get(note.gitlab_project_id)
         if repo is None:
             logger.error("No repo found for note project_id=%s", note.gitlab_project_id)
