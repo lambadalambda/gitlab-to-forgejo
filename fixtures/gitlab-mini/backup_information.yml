@@ -1,0 +1,16 @@
+:db_version: '20251030191257'
+:backup_created_at: !ruby/object:ActiveSupport::TimeWithZone
+  utc: 2026-02-04 05:35:52.588862067 Z
+  zone: !ruby/object:ActiveSupport::TimeZone
+    name: Etc/UTC
+  time: 2026-02-04 05:35:52.588862067 Z
+:gitlab_version: 18.4.6
+:tar_version: tar (GNU tar) 1.35
+:installation_type: gitlab-docker
+:skipped: tar,artifacts
+:repositories_storages: ''
+:repositories_paths: ''
+:skip_repositories_paths: ''
+:repositories_server_side: false
+:backup_id: 1770183352_2026_02_04_18.4.6
+:full_backup_id:
