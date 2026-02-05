@@ -71,14 +71,16 @@ class ForgejoClient:
             raise ValueError(f"path must start with '/': {path!r}")
         return f"{self._api_url}{path}"
 
-    def _request_json(
+    def _request(
         self,
         method: str,
         path: str,
         *,
         params: dict[str, Any] | None = None,
         json: Any | None = None,
-    ) -> Any:
+        files: Any | None = None,
+        data: Any | None = None,
+    ) -> requests.Response:
         url = self._url(path)
         headers = {"Authorization": f"token {self._token}"}
         resp = self._session.request(
@@ -87,6 +89,8 @@ class ForgejoClient:
             headers=headers,
             params=params,
             json=json,
+            files=files,
+            data=data,
             timeout=30,
         )
 
@@ -96,6 +100,18 @@ class ForgejoClient:
             )
         if resp.status_code >= 400:
             raise ForgejoError(method=method, url=url, status_code=resp.status_code, body=resp.text)
+
+        return resp
+
+    def _request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json: Any | None = None,
+    ) -> Any:
+        resp = self._request(method, path, params=params, json=json)
 
         if resp.status_code == 204 or not resp.content:
             return None
@@ -288,6 +304,24 @@ class ForgejoClient:
         assert isinstance(data, dict)
         return data
 
+    def edit_issue_body(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        issue_number: int,
+        body: str,
+        sudo: str | None = None,
+    ) -> dict[str, Any]:
+        data = self._request_json(
+            "PATCH",
+            f"/repos/{owner}/{repo}/issues/{issue_number}",
+            params={"sudo": sudo} if sudo else None,
+            json={"body": body},
+        )
+        assert isinstance(data, dict)
+        return data
+
     def create_pull_request(
         self,
         *,
@@ -328,6 +362,64 @@ class ForgejoClient:
             params={"sudo": sudo} if sudo else None,
             json={"body": body},
         )
+        assert isinstance(data, dict)
+        return data
+
+    def edit_issue_comment(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        comment_id: int,
+        body: str,
+        sudo: str | None = None,
+    ) -> dict[str, Any]:
+        data = self._request_json(
+            "PATCH",
+            f"/repos/{owner}/{repo}/issues/comments/{comment_id}",
+            params={"sudo": sudo} if sudo else None,
+            json={"body": body},
+        )
+        assert isinstance(data, dict)
+        return data
+
+    def create_issue_attachment(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        issue_number: int,
+        filename: str,
+        content: bytes,
+        sudo: str | None = None,
+    ) -> dict[str, Any]:
+        resp = self._request(
+            "POST",
+            f"/repos/{owner}/{repo}/issues/{issue_number}/assets",
+            params={"sudo": sudo} if sudo else None,
+            files={"attachment": (filename, content)},
+        )
+        data = resp.json()
+        assert isinstance(data, dict)
+        return data
+
+    def create_issue_comment_attachment(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        comment_id: int,
+        filename: str,
+        content: bytes,
+        sudo: str | None = None,
+    ) -> dict[str, Any]:
+        resp = self._request(
+            "POST",
+            f"/repos/{owner}/{repo}/issues/comments/{comment_id}/assets",
+            params={"sudo": sudo} if sudo else None,
+            files={"attachment": (filename, content)},
+        )
+        data = resp.json()
         assert isinstance(data, dict)
         return data
 

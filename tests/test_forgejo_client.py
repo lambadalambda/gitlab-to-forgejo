@@ -291,3 +291,89 @@ def test_replace_issue_labels_puts_names() -> None:
     assert labels[0]["name"] == "bug"
     body = json.loads(responses.calls[0].request.body)
     assert body == {"labels": ["bug", "discussion"]}
+
+
+@responses.activate
+def test_create_issue_attachment_posts_multipart_and_returns_attachment() -> None:
+    client = ForgejoClient(base_url="http://example.test", token="t0")
+
+    responses.add(
+        responses.POST,
+        "http://example.test/api/v1/repos/pleroma/docs/issues/1/assets",
+        json={"uuid": "u1", "browser_download_url": "http://example.test/attachments/u1"},
+        status=201,
+    )
+
+    attachment = client.create_issue_attachment(
+        owner="pleroma",
+        repo="docs",
+        issue_number=1,
+        filename="screen.png",
+        content=b"png-bytes",
+        sudo="lanodan",
+    )
+
+    assert attachment["uuid"] == "u1"
+    assert "sudo=lanodan" in responses.calls[0].request.url
+    body = responses.calls[0].request.body
+    assert isinstance(body, (bytes, bytearray))
+    assert b"screen.png" in body
+    assert b"png-bytes" in body
+
+
+@responses.activate
+def test_create_issue_comment_attachment_posts_multipart() -> None:
+    client = ForgejoClient(base_url="http://example.test", token="t0")
+
+    responses.add(
+        responses.POST,
+        "http://example.test/api/v1/repos/pleroma/docs/issues/comments/123/assets",
+        json={"uuid": "u2", "browser_download_url": "http://example.test/attachments/u2"},
+        status=201,
+    )
+
+    attachment = client.create_issue_comment_attachment(
+        owner="pleroma",
+        repo="docs",
+        comment_id=123,
+        filename="screen.png",
+        content=b"png-bytes",
+        sudo="lanodan",
+    )
+
+    assert attachment["uuid"] == "u2"
+    assert "sudo=lanodan" in responses.calls[0].request.url
+
+
+@responses.activate
+def test_edit_issue_body_patches_body() -> None:
+    client = ForgejoClient(base_url="http://example.test", token="t0")
+
+    responses.add(
+        responses.PATCH,
+        "http://example.test/api/v1/repos/pleroma/docs/issues/1",
+        json={"number": 1},
+        status=201,
+    )
+
+    client.edit_issue_body(owner="pleroma", repo="docs", issue_number=1, body="new body")
+
+    payload = json.loads(responses.calls[0].request.body)
+    assert payload == {"body": "new body"}
+
+
+@responses.activate
+def test_edit_issue_comment_patches_body() -> None:
+    client = ForgejoClient(base_url="http://example.test", token="t0")
+
+    responses.add(
+        responses.PATCH,
+        "http://example.test/api/v1/repos/pleroma/docs/issues/comments/123",
+        json={"id": 123},
+        status=200,
+    )
+
+    client.edit_issue_comment(owner="pleroma", repo="docs", comment_id=123, body="new body")
+
+    payload = json.loads(responses.calls[0].request.body)
+    assert payload == {"body": "new body"}
