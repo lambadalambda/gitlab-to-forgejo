@@ -745,6 +745,7 @@ def apply_note_uploads(
             raise ValueError(f"no repo found for note uploads project_id={note.gitlab_project_id}")
 
         sudo = user_by_id.get(note.author_id)
+        attachment_sudo = sudo
         mapping: dict[str, str] = {}
         seen_urls: set[str] = set()
         for url, upload_hash, filename in iter_gitlab_upload_urls(note.body):
@@ -759,14 +760,27 @@ def apply_note_uploads(
             content = upload_bytes_by_upload.get(upload)
             if content is None:
                 continue
-            resp = client.create_issue_comment_attachment(
-                owner=repo.owner,
-                repo=repo.name,
-                comment_id=int(comment_id),
-                filename=filename,
-                content=content,
-                sudo=sudo,
-            )
+            try:
+                resp = client.create_issue_comment_attachment(
+                    owner=repo.owner,
+                    repo=repo.name,
+                    comment_id=int(comment_id),
+                    filename=filename,
+                    content=content,
+                    sudo=attachment_sudo,
+                )
+            except ForgejoError as err:
+                if err.status_code != 403 or attachment_sudo is None:
+                    raise
+                attachment_sudo = None
+                resp = client.create_issue_comment_attachment(
+                    owner=repo.owner,
+                    repo=repo.name,
+                    comment_id=int(comment_id),
+                    filename=filename,
+                    content=content,
+                    sudo=attachment_sudo,
+                )
             new_url = resp.get("browser_download_url")
             if new_url:
                 mapping[url] = str(new_url)

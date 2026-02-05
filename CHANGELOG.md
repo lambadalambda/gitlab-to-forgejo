@@ -43,3 +43,4 @@ The format is based on *Keep a Changelog*.
 - MR import no longer crashes when Forgejo rejects PR creation with `422` "There are no changes between the head and the base"; such MRs are imported as issues.
 - Default branch detection prefers `develop`/`trunk`/`stable` when `main`/`master` are absent.
 - Notes with `project_id` missing are no longer dropped when the project can be inferred from the issue/MR.
+- GitLab `/uploads/...` comment attachment migration no longer fails when the comment author lacks write permission; the migrator retries comment-attachment uploads as the admin user.
