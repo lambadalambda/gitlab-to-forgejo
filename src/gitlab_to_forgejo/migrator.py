@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import re
 import time
 from collections.abc import Mapping
@@ -23,6 +24,8 @@ from gitlab_to_forgejo.gitlab_uploads import (
     replace_gitlab_upload_urls,
 )
 from gitlab_to_forgejo.plan_builder import Plan
+
+logger = logging.getLogger(__name__)
 
 
 class _ForgejoOps(Protocol):
@@ -451,13 +454,27 @@ def apply_issues(
         if repo is None:
             raise ValueError(f"no repo found for issue project_id={issue.gitlab_project_id}")
 
-        resp = client.create_issue(
-            owner=repo.owner,
-            repo=repo.name,
-            title=issue.title,
-            body=issue.description,
-            sudo=user_by_id.get(issue.author_id),
-        )
+        sudo = user_by_id.get(issue.author_id)
+        try:
+            resp = client.create_issue(
+                owner=repo.owner,
+                repo=repo.name,
+                title=issue.title,
+                body=issue.description,
+                sudo=sudo,
+            )
+        except ForgejoError as err:
+            logger.error(
+                "Create issue failed for %s/%s GitLab issue #%s (id=%s) sudo=%s status=%s body=%r",
+                repo.owner,
+                repo.name,
+                issue.gitlab_issue_iid,
+                issue.gitlab_issue_id,
+                sudo,
+                err.status_code,
+                err.body,
+            )
+            raise
         number = int(resp["number"])
         issue_number_by_gitlab_issue_id[issue.gitlab_issue_id] = number
 
@@ -619,6 +636,20 @@ def apply_merge_requests(
                     created_issue = True
                     break
                 if not _is_transient_target_not_found(err) or attempt >= len(delays):
+                    sudo = user_by_id.get(mr.author_id)
+                    logger.error(
+                        "Create PR failed for %s/%s GitLab MR !%s (id=%s) "
+                        "head=%s base=%s sudo=%s status=%s body=%r",
+                        repo.owner,
+                        repo.name,
+                        mr.gitlab_mr_iid,
+                        mr.gitlab_mr_id,
+                        head,
+                        base,
+                        sudo,
+                        err.status_code,
+                        err.body,
+                    )
                     raise
                 time.sleep(delays[attempt])
 
@@ -659,13 +690,30 @@ def apply_notes(
         if issue_number is None:
             continue
 
-        resp = client.create_issue_comment(
-            owner=repo.owner,
-            repo=repo.name,
-            issue_number=issue_number,
-            body=note.body,
-            sudo=user_by_id.get(note.author_id),
-        )
+        sudo = user_by_id.get(note.author_id)
+        try:
+            resp = client.create_issue_comment(
+                owner=repo.owner,
+                repo=repo.name,
+                issue_number=issue_number,
+                body=note.body,
+                sudo=sudo,
+            )
+        except ForgejoError as err:
+            logger.error(
+                "Create comment failed for %s/%s GitLab note %s on %s %s "
+                "(forgejo issue/pr #%s) sudo=%s status=%s body=%r",
+                repo.owner,
+                repo.name,
+                note.gitlab_note_id,
+                note.noteable_type,
+                note.noteable_id,
+                issue_number,
+                sudo,
+                err.status_code,
+                err.body,
+            )
+            raise
         comment_id_raw = resp.get("id")
         if comment_id_raw is not None:
             comment_id_by_gitlab_note_id[note.gitlab_note_id] = int(comment_id_raw)
@@ -712,14 +760,29 @@ def apply_issue_and_pr_uploads(
             content = upload_bytes_by_upload.get(upload)
             if content is None:
                 continue
-            resp = client.create_issue_attachment(
-                owner=repo.owner,
-                repo=repo.name,
-                issue_number=int(issue_number),
-                filename=filename,
-                content=content,
-                sudo=sudo,
-            )
+            try:
+                resp = client.create_issue_attachment(
+                    owner=repo.owner,
+                    repo=repo.name,
+                    issue_number=int(issue_number),
+                    filename=filename,
+                    content=content,
+                    sudo=sudo,
+                )
+            except ForgejoError as err:
+                logger.error(
+                    "Create issue attachment failed for %s/%s GitLab issue #%s (id=%s) "
+                    "filename=%s sudo=%s status=%s body=%r",
+                    repo.owner,
+                    repo.name,
+                    issue.gitlab_issue_iid,
+                    issue.gitlab_issue_id,
+                    filename,
+                    sudo,
+                    err.status_code,
+                    err.body,
+                )
+                raise
             new_url = resp.get("browser_download_url")
             if new_url:
                 mapping[url] = str(new_url)
@@ -729,13 +792,28 @@ def apply_issue_and_pr_uploads(
         new_body = replace_gitlab_upload_urls(issue.description, mapping=mapping)
         if new_body == issue.description:
             continue
-        client.edit_issue_body(
-            owner=repo.owner,
-            repo=repo.name,
-            issue_number=int(issue_number),
-            body=new_body,
-            sudo=sudo,
-        )
+        try:
+            client.edit_issue_body(
+                owner=repo.owner,
+                repo=repo.name,
+                issue_number=int(issue_number),
+                body=new_body,
+                sudo=sudo,
+            )
+        except ForgejoError as err:
+            logger.error(
+                "Edit issue body failed for %s/%s GitLab issue #%s (id=%s) "
+                "forgejo issue #%s sudo=%s status=%s body=%r",
+                repo.owner,
+                repo.name,
+                issue.gitlab_issue_iid,
+                issue.gitlab_issue_id,
+                issue_number,
+                sudo,
+                err.status_code,
+                err.body,
+            )
+            raise
 
     for mr in plan.merge_requests:
         pr_number = pr_number_by_gitlab_mr_id.get(mr.gitlab_mr_id)
@@ -762,14 +840,29 @@ def apply_issue_and_pr_uploads(
             content = upload_bytes_by_upload.get(upload)
             if content is None:
                 continue
-            resp = client.create_issue_attachment(
-                owner=repo.owner,
-                repo=repo.name,
-                issue_number=int(pr_number),
-                filename=filename,
-                content=content,
-                sudo=sudo,
-            )
+            try:
+                resp = client.create_issue_attachment(
+                    owner=repo.owner,
+                    repo=repo.name,
+                    issue_number=int(pr_number),
+                    filename=filename,
+                    content=content,
+                    sudo=sudo,
+                )
+            except ForgejoError as err:
+                logger.error(
+                    "Create PR attachment failed for %s/%s GitLab MR !%s (id=%s) "
+                    "filename=%s sudo=%s status=%s body=%r",
+                    repo.owner,
+                    repo.name,
+                    mr.gitlab_mr_iid,
+                    mr.gitlab_mr_id,
+                    filename,
+                    sudo,
+                    err.status_code,
+                    err.body,
+                )
+                raise
             new_url = resp.get("browser_download_url")
             if new_url:
                 mapping[url] = str(new_url)
@@ -791,6 +884,18 @@ def apply_issue_and_pr_uploads(
             # MRs imported as issues do not have a pull request to edit.
             if err.status_code == 404:
                 continue
+            logger.error(
+                "Edit PR body failed for %s/%s GitLab MR !%s (id=%s) forgejo pr #%s "
+                "sudo=%s status=%s body=%r",
+                repo.owner,
+                repo.name,
+                mr.gitlab_mr_iid,
+                mr.gitlab_mr_id,
+                pr_number,
+                sudo,
+                err.status_code,
+                err.body,
+            )
             raise
 
 
@@ -843,16 +948,41 @@ def apply_note_uploads(
                 )
             except ForgejoError as err:
                 if err.status_code != 403 or attachment_sudo is None:
+                    logger.error(
+                        "Create comment attachment failed for %s/%s GitLab note %s "
+                        "filename=%s sudo=%s status=%s body=%r",
+                        repo.owner,
+                        repo.name,
+                        note.gitlab_note_id,
+                        filename,
+                        attachment_sudo,
+                        err.status_code,
+                        err.body,
+                    )
                     raise
                 attachment_sudo = None
-                resp = client.create_issue_comment_attachment(
-                    owner=repo.owner,
-                    repo=repo.name,
-                    comment_id=int(comment_id),
-                    filename=filename,
-                    content=content,
-                    sudo=attachment_sudo,
-                )
+                try:
+                    resp = client.create_issue_comment_attachment(
+                        owner=repo.owner,
+                        repo=repo.name,
+                        comment_id=int(comment_id),
+                        filename=filename,
+                        content=content,
+                        sudo=attachment_sudo,
+                    )
+                except ForgejoError as err:
+                    logger.error(
+                        "Create comment attachment failed for %s/%s GitLab note %s "
+                        "filename=%s sudo=%s status=%s body=%r",
+                        repo.owner,
+                        repo.name,
+                        note.gitlab_note_id,
+                        filename,
+                        attachment_sudo,
+                        err.status_code,
+                        err.body,
+                    )
+                    raise
             new_url = resp.get("browser_download_url")
             if new_url:
                 mapping[url] = str(new_url)
@@ -862,13 +992,27 @@ def apply_note_uploads(
         new_body = replace_gitlab_upload_urls(note.body, mapping=mapping)
         if new_body == note.body:
             continue
-        client.edit_issue_comment(
-            owner=repo.owner,
-            repo=repo.name,
-            comment_id=int(comment_id),
-            body=new_body,
-            sudo=sudo,
-        )
+        try:
+            client.edit_issue_comment(
+                owner=repo.owner,
+                repo=repo.name,
+                comment_id=int(comment_id),
+                body=new_body,
+                sudo=sudo,
+            )
+        except ForgejoError as err:
+            logger.error(
+                "Edit comment body failed for %s/%s GitLab note %s forgejo comment %s "
+                "sudo=%s status=%s body=%r",
+                repo.owner,
+                repo.name,
+                note.gitlab_note_id,
+                comment_id,
+                sudo,
+                err.status_code,
+                err.body,
+            )
+            raise
 
 
 def collect_project_uploads(plan: Plan) -> set[GitLabProjectUpload]:
