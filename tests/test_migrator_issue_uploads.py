@@ -4,7 +4,15 @@ from pathlib import Path
 
 from gitlab_to_forgejo.gitlab_uploads import GitLabProjectUpload
 from gitlab_to_forgejo.migrator import apply_issue_and_pr_uploads, apply_note_uploads
-from gitlab_to_forgejo.plan_builder import IssuePlan, NotePlan, OrgPlan, Plan, RepoPlan, UserPlan
+from gitlab_to_forgejo.plan_builder import (
+    IssuePlan,
+    MergeRequestPlan,
+    NotePlan,
+    OrgPlan,
+    Plan,
+    RepoPlan,
+    UserPlan,
+)
 
 
 class _FakeForgejo:
@@ -52,6 +60,18 @@ class _FakeForgejo:
             ("create_issue_comment_attachment", owner, repo, comment_id, filename, content, sudo)
         )
         return {"browser_download_url": f"http://example.test/attachments/{comment_id}/{filename}"}
+
+    def edit_pull_request_body(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        pr_number: int,
+        body: str,
+        sudo: str | None = None,
+    ) -> dict[str, object]:
+        self.calls.append(("edit_pull_request_body", owner, repo, pr_number, body, sudo))
+        return {"number": pr_number}
 
     def edit_issue_comment(
         self,
@@ -144,6 +164,91 @@ def test_apply_issue_and_pr_uploads_uploads_and_rewrites_body(tmp_path: Path) ->
             "meta",
             1,
             "Screenshot: ![](http://example.test/attachments/screen.png)",
+            "alice",
+        ),
+    ]
+
+
+def test_apply_issue_and_pr_uploads_rewrites_pull_request_body(tmp_path: Path) -> None:
+    repo = RepoPlan(
+        owner="pleroma",
+        name="meta",
+        gitlab_project_id=1,
+        gitlab_disk_path="@hashed/aa/bb/meta",
+        bundle_path=tmp_path / "repo.bundle",
+        refs_path=tmp_path / "repo.refs",
+        wiki_bundle_path=tmp_path / "wiki.bundle",
+        wiki_refs_path=tmp_path / "wiki.refs",
+    )
+    mr = MergeRequestPlan(
+        gitlab_mr_id=30,
+        gitlab_mr_iid=1,
+        gitlab_target_project_id=1,
+        source_branch="feature",
+        target_branch="master",
+        title="MR",
+        description="Screenshot: /uploads/765b08065cca166722283f5cf5234971/screen.png",
+        author_id=1,
+    )
+    plan = Plan(
+        backup_id="x",
+        orgs=[
+            OrgPlan(
+                name="pleroma",
+                full_path="pleroma",
+                gitlab_namespace_id=3,
+                description=None,
+            )
+        ],
+        repos=[repo],
+        users=[
+            UserPlan(
+                gitlab_user_id=1,
+                username="alice",
+                email="a@e",
+                full_name="A",
+                state="active",
+            )
+        ],
+        org_members={},
+        issues=[],
+        merge_requests=[mr],
+        notes=[],
+    )
+
+    upload = GitLabProjectUpload(
+        disk_path=repo.gitlab_disk_path,
+        upload_hash="765b08065cca166722283f5cf5234971",
+        filename="screen.png",
+    )
+    upload_bytes = {upload: b"png-bytes"}
+
+    client = _FakeForgejo()
+    apply_issue_and_pr_uploads(
+        plan,
+        client,
+        user_by_id={1: "alice"},
+        issue_number_by_gitlab_issue_id={},
+        pr_number_by_gitlab_mr_id={30: 2},
+        upload_bytes_by_upload=upload_bytes,
+    )
+
+    assert client.calls == [
+        (
+            "create_issue_attachment",
+            "pleroma",
+            "meta",
+            2,
+            "screen.png",
+            b"png-bytes",
+            "alice",
+        ),
+        (
+            "edit_pull_request_body",
+            "pleroma",
+            "meta",
+            2,
+            "Screenshot: http://example.test/attachments/screen.png",
             "alice",
         ),
     ]

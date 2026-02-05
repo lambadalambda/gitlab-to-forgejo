@@ -94,6 +94,16 @@ class _ForgejoRepoOps(_ForgejoOps, Protocol):
         sudo: str | None,
     ) -> Mapping[str, object]: ...
 
+    def edit_pull_request_body(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        pr_number: int,
+        body: str,
+        sudo: str | None,
+    ) -> Mapping[str, object]: ...
+
     def edit_issue_comment(
         self,
         *,
@@ -600,7 +610,6 @@ def apply_issue_and_pr_uploads(
     pr_number_by_gitlab_mr_id: Mapping[int, int],
     upload_bytes_by_upload: Mapping[GitLabProjectUpload, bytes],
 ) -> None:
-    del pr_number_by_gitlab_mr_id
     if not upload_bytes_by_upload:
         return
 
@@ -655,6 +664,62 @@ def apply_issue_and_pr_uploads(
             body=new_body,
             sudo=sudo,
         )
+
+    for mr in plan.merge_requests:
+        pr_number = pr_number_by_gitlab_mr_id.get(mr.gitlab_mr_id)
+        if pr_number is None:
+            continue
+        repo = repo_by_project_id.get(mr.gitlab_target_project_id)
+        if repo is None:
+            raise ValueError(
+                f"no repo found for merge request uploads project_id={mr.gitlab_target_project_id}"
+            )
+
+        sudo = user_by_id.get(mr.author_id)
+        mapping: dict[str, str] = {}
+        seen_urls: set[str] = set()
+        for url, upload_hash, filename in iter_gitlab_upload_urls(mr.description):
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+            upload = GitLabProjectUpload(
+                disk_path=repo.gitlab_disk_path,
+                upload_hash=upload_hash,
+                filename=filename,
+            )
+            content = upload_bytes_by_upload.get(upload)
+            if content is None:
+                continue
+            resp = client.create_issue_attachment(
+                owner=repo.owner,
+                repo=repo.name,
+                issue_number=int(pr_number),
+                filename=filename,
+                content=content,
+                sudo=sudo,
+            )
+            new_url = resp.get("browser_download_url")
+            if new_url:
+                mapping[url] = str(new_url)
+
+        if not mapping:
+            continue
+        new_body = replace_gitlab_upload_urls(mr.description, mapping=mapping)
+        if new_body == mr.description:
+            continue
+        try:
+            client.edit_pull_request_body(
+                owner=repo.owner,
+                repo=repo.name,
+                pr_number=int(pr_number),
+                body=new_body,
+                sudo=sudo,
+            )
+        except ForgejoError as err:
+            # MRs imported as issues do not have a pull request to edit.
+            if err.status_code == 404:
+                continue
+            raise
 
 
 def apply_note_uploads(

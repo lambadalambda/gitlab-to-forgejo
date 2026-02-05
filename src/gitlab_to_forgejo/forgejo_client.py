@@ -322,6 +322,24 @@ class ForgejoClient:
         assert isinstance(data, dict)
         return data
 
+    def edit_pull_request_body(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        pr_number: int,
+        body: str,
+        sudo: str | None = None,
+    ) -> dict[str, Any]:
+        data = self._request_json(
+            "PATCH",
+            f"/repos/{owner}/{repo}/pulls/{pr_number}",
+            params={"sudo": sudo} if sudo else None,
+            json={"body": body},
+        )
+        assert isinstance(data, dict)
+        return data
+
     def create_pull_request(
         self,
         *,

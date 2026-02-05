@@ -377,3 +377,20 @@ def test_edit_issue_comment_patches_body() -> None:
 
     payload = json.loads(responses.calls[0].request.body)
     assert payload == {"body": "new body"}
+
+
+@responses.activate
+def test_edit_pull_request_body_patches_body() -> None:
+    client = ForgejoClient(base_url="http://example.test", token="t0")
+
+    responses.add(
+        responses.PATCH,
+        "http://example.test/api/v1/repos/pleroma/docs/pulls/2",
+        json={"number": 2},
+        status=201,
+    )
+
+    client.edit_pull_request_body(owner="pleroma", repo="docs", pr_number=2, body="new body")
+
+    payload = json.loads(responses.calls[0].request.body)
+    assert payload == {"body": "new body"}
