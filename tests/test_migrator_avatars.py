@@ -40,6 +40,7 @@ def test_apply_user_avatars_extracts_from_uploads_tar_and_sets_avatar(tmp_path: 
                 owner="pleroma",
                 name="docs",
                 gitlab_project_id=673,
+                gitlab_disk_path="@hashed/aa/bb/docs",
                 bundle_path=Path("repo.bundle"),
                 refs_path=Path("repo.refs"),
                 wiki_bundle_path=Path("wiki.bundle"),

@@ -27,6 +27,11 @@ def test_build_plan_from_fixture() -> None:
         ("pleroma", "docs"),
         ("pleroma-elixir-libraries", "pool-benchmark"),
     }
+    disk_path_by_repo = {(r.owner, r.name): r.gitlab_disk_path for r in plan.repos}
+    assert disk_path_by_repo[("pleroma", "docs")].startswith("@hashed/f4/46/")
+    assert disk_path_by_repo[("pleroma-elixir-libraries", "pool-benchmark")].startswith(
+        "@hashed/82/9f/"
+    )
     for repo in plan.repos:
         assert repo.bundle_path.is_file()
         assert repo.refs_path.is_file()

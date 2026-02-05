@@ -29,6 +29,7 @@ def test_push_merge_request_heads_pushes_synthetic_branches_for_missing_source_b
         owner="pleroma",
         name="docs",
         gitlab_project_id=1,
+        gitlab_disk_path="@hashed/aa/bb/docs",
         bundle_path=bundle,
         refs_path=refs,
         wiki_bundle_path=tmp_path / "wiki.bundle",
@@ -85,4 +86,3 @@ def test_push_merge_request_heads_pushes_synthetic_branches_for_missing_source_b
     assert first["refspecs"] == ["b" * 40 + ":refs/heads/gitlab-mr-iid-3"]
     assert first["username"] == "root"
     assert first["token"] == "t0"
-

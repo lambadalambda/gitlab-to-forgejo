@@ -110,6 +110,7 @@ def test_apply_plan_adds_reporters_for_interactors_without_group_members(tmp_pat
                 owner="pleroma",
                 name="docs",
                 gitlab_project_id=673,
+                gitlab_disk_path="@hashed/aa/bb/docs",
                 bundle_path=tmp_path / "repo.bundle",
                 refs_path=tmp_path / "repo.refs",
                 wiki_bundle_path=tmp_path / "wiki.bundle",

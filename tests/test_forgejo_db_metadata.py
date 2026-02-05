@@ -64,16 +64,17 @@ def test_build_metadata_fix_sql_closes_closed_issues_and_sets_closed_time() -> N
                 description=None,
             )
         ],
-        repos=[
-            RepoPlan(
-                owner="pleroma",
-                name="docs",
-                gitlab_project_id=673,
-                bundle_path=Path("/tmp/repo.bundle"),
-                refs_path=Path("/tmp/repo.refs"),
-                wiki_bundle_path=Path("/tmp/wiki.bundle"),
-                wiki_refs_path=Path("/tmp/wiki.refs"),
-            )
+            repos=[
+                RepoPlan(
+                    owner="pleroma",
+                    name="docs",
+                    gitlab_project_id=673,
+                    gitlab_disk_path="@hashed/aa/bb/docs",
+                    bundle_path=Path("/tmp/repo.bundle"),
+                    refs_path=Path("/tmp/repo.refs"),
+                    wiki_bundle_path=Path("/tmp/wiki.bundle"),
+                    wiki_refs_path=Path("/tmp/wiki.refs"),
+                )
         ],
         users=[
             UserPlan(

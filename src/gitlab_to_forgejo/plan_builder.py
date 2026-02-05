@@ -22,6 +22,7 @@ class RepoPlan:
     owner: str
     name: str
     gitlab_project_id: int
+    gitlab_disk_path: str
     bundle_path: Path
     refs_path: Path
     wiki_bundle_path: Path
@@ -298,6 +299,7 @@ def build_plan(backup_root: Path, *, root_group_path: str) -> Plan:
                     owner=org_name_by_ns_id[namespace_id],
                     name=row["path"] or "",
                     gitlab_project_id=project_id,
+                    gitlab_disk_path=disk_path,
                     bundle_path=bundle_path,
                     refs_path=refs_path,
                     wiki_bundle_path=wiki_bundle_path,
