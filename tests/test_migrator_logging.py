@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from gitlab_to_forgejo.forgejo_client import ForgejoError
-from gitlab_to_forgejo.migrator import apply_merge_requests
+from gitlab_to_forgejo.migrator import apply_merge_requests, migrate_plan
 from gitlab_to_forgejo.plan_builder import MergeRequestPlan, OrgPlan, Plan, RepoPlan
 
 
@@ -108,3 +109,33 @@ def test_apply_merge_requests_logs_context_on_unhandled_forgejo_error(
     assert "head=feature" in caplog.text
     assert "base=master" in caplog.text
     assert "status=500" in caplog.text
+
+
+def test_migrate_plan_logs_phase_progress(caplog: pytest.LogCaptureFixture) -> None:
+    plan = Plan(
+        backup_id="x",
+        orgs=[],
+        repos=[],
+        users=[],
+        org_members={},
+        issues=[],
+        merge_requests=[],
+        notes=[],
+    )
+
+    caplog.set_level(logging.INFO, logger="gitlab_to_forgejo.migrator")
+
+    with patch("gitlab_to_forgejo.migrator.apply_metadata_fix_sql"):
+        migrate_plan(
+            plan,
+            client=object(),  # type: ignore[arg-type]
+            user_password="pw",
+            private_repos=True,
+            forgejo_url="http://example.test",
+            git_username="root",
+            git_token="t0",
+        )
+
+    assert "Starting migration" in caplog.text
+    assert "Users/orgs/teams" in caplog.text
+    assert "Backfill metadata" in caplog.text

@@ -4,7 +4,8 @@ import base64
 import logging
 import re
 import time
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from typing import Protocol
 
 from gitlab_to_forgejo.forgejo_client import ForgejoError
@@ -26,6 +27,24 @@ from gitlab_to_forgejo.gitlab_uploads import (
 from gitlab_to_forgejo.plan_builder import Plan
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _phase(name: str) -> Iterator[None]:
+    start = time.monotonic()
+    logger.info("==> %s", name)
+    try:
+        yield
+    finally:
+        elapsed = time.monotonic() - start
+        logger.info("<== %s (%.1fs)", name, elapsed)
+
+
+def _progress_step(total: int, *, target_messages: int = 20, min_step: int = 25) -> int:
+    if total <= 0:
+        return 1
+    step = max(1, total // target_messages)
+    return max(min_step, step)
 
 
 class _ForgejoOps(Protocol):
@@ -502,6 +521,8 @@ def apply_plan(plan: Plan, client: _ForgejoOps, *, user_password: str) -> dict[s
 
 
 def apply_repos(plan: Plan, client: _ForgejoRepoOps, *, private: bool) -> None:
+    if plan.repos:
+        logger.info("Ensuring repositories (%d)", len(plan.repos))
     for repo in plan.repos:
         try:
             default_branch = guess_default_branch(repo.refs_path)
@@ -530,7 +551,11 @@ def apply_repos(plan: Plan, client: _ForgejoRepoOps, *, private: bool) -> None:
 
 def push_repos(plan: Plan, *, forgejo_url: str, git_username: str, git_token: str) -> None:
     base = forgejo_url.rstrip("/")
-    for repo in plan.repos:
+    total = len(plan.repos)
+    if total:
+        logger.info("Pushing git repositories (%d)", total)
+    for idx, repo in enumerate(plan.repos, start=1):
+        logger.info("Git push repo %d/%d %s/%s", idx, total, repo.owner, repo.name)
         try:
             push_bundle_http(
                 bundle_path=repo.bundle_path,
@@ -546,10 +571,14 @@ def push_repos(plan: Plan, *, forgejo_url: str, git_username: str, git_token: st
 
 def push_wikis(plan: Plan, *, forgejo_url: str, git_username: str, git_token: str) -> None:
     base = forgejo_url.rstrip("/")
-    for repo in plan.repos:
+    if plan.repos:
+        logger.info("Pushing git wikis (best-effort)")
+    total = len(plan.repos)
+    for idx, repo in enumerate(plan.repos, start=1):
         refspecs = list_wiki_push_refspecs(repo.wiki_refs_path)
         if not refspecs or not repo.wiki_bundle_path.exists():
             continue
+        logger.info("Git push wiki %d/%d %s/%s", idx, total, repo.owner, repo.name)
         try:
             ensure_wiki_repo_exists(owner=repo.owner, repo=repo.name)
         except Exception:
@@ -587,6 +616,8 @@ def push_merge_request_heads(
     refs_by_project_id: dict[int, dict[str, str]] = {}
     refspecs_by_project_id: dict[int, list[str]] = {}
 
+    if plan.merge_requests:
+        logger.info("Pushing merge request helper branches (%d)", len(plan.merge_requests))
     for mr in plan.merge_requests:
         repo = repo_by_project_id.get(mr.gitlab_target_project_id)
         if repo is None:
@@ -639,7 +670,14 @@ def apply_issues(
     repo_by_project_id = {r.gitlab_project_id: r for r in plan.repos}
     issue_number_by_gitlab_issue_id: dict[int, int] = {}
 
-    for issue in plan.issues:
+    total = len(plan.issues)
+    if total:
+        logger.info("Importing issues (%d)", total)
+    step = _progress_step(total)
+
+    for idx, issue in enumerate(plan.issues, start=1):
+        if total and (idx == 1 or idx % step == 0 or idx == total):
+            logger.info("Issues progress: %d/%d", idx, total)
         repo = repo_by_project_id.get(issue.gitlab_project_id)
         if repo is None:
             logger.error("No repo found for issue project_id=%s", issue.gitlab_project_id)
@@ -689,7 +727,14 @@ def apply_merge_requests(
     pr_number_by_gitlab_mr_id: dict[int, int] = {}
     refs_by_project_id: dict[int, dict[str, str]] = {}
 
-    for mr in plan.merge_requests:
+    total = len(plan.merge_requests)
+    if total:
+        logger.info("Importing merge requests (%d)", total)
+    step = _progress_step(total)
+
+    for idx, mr in enumerate(plan.merge_requests, start=1):
+        if total and (idx == 1 or idx % step == 0 or idx == total):
+            logger.info("Merge requests progress: %d/%d", idx, total)
         repo = repo_by_project_id.get(mr.gitlab_target_project_id)
         if repo is None:
             logger.error("No repo found for mr target_project_id=%s", mr.gitlab_target_project_id)
@@ -1072,7 +1117,14 @@ def apply_notes(
     repo_by_project_id = {r.gitlab_project_id: r for r in plan.repos}
     comment_id_by_gitlab_note_id: dict[int, int] = {}
 
-    for note in plan.notes:
+    total = len(plan.notes)
+    if total:
+        logger.info("Importing notes/comments (%d)", total)
+    step = _progress_step(total, min_step=100)
+
+    for idx, note in enumerate(plan.notes, start=1):
+        if total and (idx == 1 or idx % step == 0 or idx == total):
+            logger.info("Notes progress: %d/%d", idx, total)
         repo = repo_by_project_id.get(note.gitlab_project_id)
         if repo is None:
             logger.error("No repo found for note project_id=%s", note.gitlab_project_id)
@@ -1144,6 +1196,9 @@ def apply_issue_and_pr_uploads(
     if not upload_bytes_by_upload:
         return
 
+    logger.info(
+        "Migrating uploads referenced in issue/PR bodies (%d files)", len(upload_bytes_by_upload)
+    )
     repo_by_project_id = {r.gitlab_project_id: r for r in plan.repos}
 
     for issue in plan.issues:
@@ -1366,6 +1421,10 @@ def apply_note_uploads(
     if not upload_bytes_by_upload:
         return
 
+    logger.info(
+        "Migrating uploads referenced in note/comment bodies (%d files)",
+        len(upload_bytes_by_upload),
+    )
     repo_by_project_id = {r.gitlab_project_id: r for r in plan.repos}
 
     for note in plan.notes:
@@ -1787,7 +1846,21 @@ def migrate_plan(
     git_token: str,
     migrate_password_hashes: bool = False,
 ) -> None:
-    forgejo_username_by_gitlab_username = apply_plan(plan, client, user_password=user_password)
+    logger.info(
+        "Starting migration (backup_id=%s): orgs=%d repos=%d users=%d issues=%d mrs=%d notes=%d labels=%d",
+        plan.backup_id,
+        len(plan.orgs),
+        len(plan.repos),
+        len(plan.users),
+        len(plan.issues),
+        len(plan.merge_requests),
+        len(plan.notes),
+        len(plan.labels),
+    )
+    logger.info("Forgejo: %s", forgejo_url.rstrip("/"))
+
+    with _phase("Users/orgs/teams"):
+        forgejo_username_by_gitlab_username = apply_plan(plan, client, user_password=user_password)
     forgejo_user_by_gitlab_user_id: dict[int, str] = {}
     for u in plan.users:
         forgejo_username = forgejo_username_by_gitlab_username.get(u.username)
@@ -1800,70 +1873,94 @@ def migrate_plan(
             forgejo_username_by_gitlab_username=forgejo_username_by_gitlab_username,
             skip_forgejo_usernames={"root", git_username},
         )
-        try:
-            apply_metadata_fix_sql(sql)
-        except Exception:
-            logger.exception("Apply password hash migration SQL failed")
+        with _phase("Password hashes (DB)"):
+            try:
+                apply_metadata_fix_sql(sql)
+            except Exception:
+                logger.exception("Apply password hash migration SQL failed")
 
     upload_bytes_by_upload: dict[GitLabProjectUpload, bytes] = {}
     if plan.uploads_tar_path is not None:
         desired_uploads = collect_project_uploads(plan)
         if desired_uploads:
+            logger.info("Uploads: scanning %d referenced /uploads files", len(desired_uploads))
+        if desired_uploads:
             try:
-                upload_bytes_by_upload = read_project_uploads_from_uploads(
-                    plan.uploads_tar_path, desired=desired_uploads
-                )
+                with _phase("Read uploads.tar.gz"):
+                    upload_bytes_by_upload = read_project_uploads_from_uploads(
+                        plan.uploads_tar_path, desired=desired_uploads
+                    )
             except Exception:
                 logger.exception("Read project uploads from uploads.tar.gz failed")
                 upload_bytes_by_upload = {}
 
-    apply_user_avatars(plan, client, user_by_id=forgejo_user_by_gitlab_user_id)
+    with _phase("User avatars"):
+        apply_user_avatars(plan, client, user_by_id=forgejo_user_by_gitlab_user_id)
 
-    apply_repos(plan, client, private=private_repos)
-    ensure_repo_labels(plan, client)
-    push_repos(plan, forgejo_url=forgejo_url, git_username=git_username, git_token=git_token)
-    push_wikis(plan, forgejo_url=forgejo_url, git_username=git_username, git_token=git_token)
-    push_merge_request_heads(
-        plan, forgejo_url=forgejo_url, git_username=git_username, git_token=git_token
-    )
+    with _phase("Repositories"):
+        apply_repos(plan, client, private=private_repos)
+    with _phase("Repo labels"):
+        ensure_repo_labels(plan, client)
+    with _phase("Git push repos"):
+        push_repos(plan, forgejo_url=forgejo_url, git_username=git_username, git_token=git_token)
+    with _phase("Git push wikis"):
+        push_wikis(plan, forgejo_url=forgejo_url, git_username=git_username, git_token=git_token)
+    with _phase("Git push MR helper branches"):
+        push_merge_request_heads(
+            plan, forgejo_url=forgejo_url, git_username=git_username, git_token=git_token
+        )
 
-    issue_numbers = apply_issues(plan, client, user_by_id=forgejo_user_by_gitlab_user_id)
-    pr_numbers = apply_merge_requests(plan, client, user_by_id=forgejo_user_by_gitlab_user_id)
-    comment_ids = apply_notes(
-        plan,
-        client,
-        user_by_id=forgejo_user_by_gitlab_user_id,
-        issue_number_by_gitlab_issue_id=issue_numbers,
-        pr_number_by_gitlab_mr_id=pr_numbers,
-    )
-    apply_issue_and_pr_uploads(
-        plan,
-        client,
-        user_by_id=forgejo_user_by_gitlab_user_id,
-        issue_number_by_gitlab_issue_id=issue_numbers,
-        pr_number_by_gitlab_mr_id=pr_numbers,
-        upload_bytes_by_upload=upload_bytes_by_upload,
-    )
-    apply_note_uploads(
-        plan,
-        client,
-        user_by_id=forgejo_user_by_gitlab_user_id,
-        comment_id_by_gitlab_note_id=comment_ids,
-        upload_bytes_by_upload=upload_bytes_by_upload,
-    )
-    apply_issue_and_mr_labels(
-        plan,
-        client,
-        issue_number_by_gitlab_issue_id=issue_numbers,
-        pr_number_by_gitlab_mr_id=pr_numbers,
-    )
+    with _phase("Issues"):
+        issue_numbers = apply_issues(plan, client, user_by_id=forgejo_user_by_gitlab_user_id)
+    with _phase("Merge requests"):
+        pr_numbers = apply_merge_requests(plan, client, user_by_id=forgejo_user_by_gitlab_user_id)
+    with _phase("Notes/comments"):
+        comment_ids = apply_notes(
+            plan,
+            client,
+            user_by_id=forgejo_user_by_gitlab_user_id,
+            issue_number_by_gitlab_issue_id=issue_numbers,
+            pr_number_by_gitlab_mr_id=pr_numbers,
+        )
+    with _phase("Issue/PR uploads"):
+        apply_issue_and_pr_uploads(
+            plan,
+            client,
+            user_by_id=forgejo_user_by_gitlab_user_id,
+            issue_number_by_gitlab_issue_id=issue_numbers,
+            pr_number_by_gitlab_mr_id=pr_numbers,
+            upload_bytes_by_upload=upload_bytes_by_upload,
+        )
+    with _phase("Note uploads"):
+        apply_note_uploads(
+            plan,
+            client,
+            user_by_id=forgejo_user_by_gitlab_user_id,
+            comment_id_by_gitlab_note_id=comment_ids,
+            upload_bytes_by_upload=upload_bytes_by_upload,
+        )
+    with _phase("Apply labels"):
+        apply_issue_and_mr_labels(
+            plan,
+            client,
+            issue_number_by_gitlab_issue_id=issue_numbers,
+            pr_number_by_gitlab_mr_id=pr_numbers,
+        )
     sql = build_metadata_fix_sql(
         plan,
         issue_number_by_gitlab_issue_id=issue_numbers,
         pr_number_by_gitlab_mr_id=pr_numbers,
         comment_id_by_gitlab_note_id=comment_ids,
     )
-    try:
-        apply_metadata_fix_sql(sql)
-    except Exception:
-        logger.exception("Apply metadata fix SQL failed")
+    logger.info(
+        "Metadata backfill: issues=%d prs=%d comments=%d sql_bytes=%d",
+        len(issue_numbers),
+        len(pr_numbers),
+        len(comment_ids),
+        len(sql.encode("utf-8")),
+    )
+    with _phase("Backfill metadata (DB)"):
+        try:
+            apply_metadata_fix_sql(sql)
+        except Exception:
+            logger.exception("Apply metadata fix SQL failed")

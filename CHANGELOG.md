@@ -34,6 +34,7 @@ The format is based on *Keep a Changelog*.
 - Optional GitLab password hash migration: `--migrate-password-hashes` (or `FORGEJO_MIGRATE_PASSWORD_HASHES=1`) copies GitLab `users.encrypted_password` bcrypt hashes into Forgejo via direct DB update so users can keep their existing passwords (best-effort; GitLab password “pepper” setups may not be compatible).
 - Contextual error logging in the migrator (includes repo + GitLab IDs/branches) to make long-running failures easier to pinpoint.
 - Best-effort migration runs: the migrator continues on per-entity failures and writes errors to `state/errors.log` (override via `--errors-log` / `FORGEJO_ERRORS_LOG`).
+- Migration progress logging: phase/timing logs at INFO level to make long runs easier to follow.
 
 ### Fixed
 
