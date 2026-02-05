@@ -1,0 +1,52 @@
+[tools]
+python = "3.12"
+
+[tasks.install]
+description = "Create venv + install dev dependencies"
+run = [
+  "mkdir -p state/pip-cache",
+  "python -m venv .venv",
+  ".venv/bin/python -m pip install -U pip",
+  "PIP_CACHE_DIR=state/pip-cache .venv/bin/python -m pip install -e '.[dev]'",
+]
+
+[tasks.fmt]
+description = "Format code (ruff)"
+run = ".venv/bin/python -m ruff format ."
+depends = ["install"]
+
+[tasks.lint]
+description = "Lint code (ruff)"
+run = ".venv/bin/python -m ruff check ."
+depends = ["install"]
+
+[tasks.test]
+description = "Run unit tests (pytest)"
+run = ".venv/bin/python -m pytest"
+depends = ["lint"]
+
+[tasks.up]
+description = "Start Forgejo via Docker Compose"
+run = "docker compose up -d"
+
+[tasks.reset]
+description = "Stop Forgejo and wipe volumes (clean slate)"
+run = [
+  "docker compose down -v --remove-orphans",
+  "rm -rf state/forgejo",
+]
+
+[tasks.bootstrap]
+description = "Create Forgejo admin user + API token"
+run = "bash scripts/bootstrap_forgejo.sh"
+depends = ["up"]
+
+[tasks.migrate]
+description = "Run migrator (users/orgs/teams + repos + git push) against fixture backup"
+run = ".venv/bin/python -m gitlab_to_forgejo migrate --backup fixtures/gitlab-mini --root-group pleroma"
+depends = ["bootstrap", "install"]
+
+[tasks.migrate-real]
+description = "Run migrator (users/orgs/teams + repos + git push) against ~/pleromagit-backup"
+run = ".venv/bin/python -m gitlab_to_forgejo migrate --backup $HOME/pleromagit-backup --root-group pleroma"
+depends = ["bootstrap", "install"]
