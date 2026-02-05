@@ -11,7 +11,13 @@ from gitlab_to_forgejo.forgejo_db import apply_metadata_fix_sql, build_metadata_
 from gitlab_to_forgejo.forgejo_wiki import ensure_wiki_repo_exists
 from gitlab_to_forgejo.git_push import push_bundle_http
 from gitlab_to_forgejo.git_refs import guess_default_branch, list_wiki_push_refspecs, read_ref_shas
-from gitlab_to_forgejo.gitlab_uploads import read_user_avatars_from_uploads
+from gitlab_to_forgejo.gitlab_uploads import (
+    GitLabProjectUpload,
+    iter_gitlab_upload_urls,
+    read_project_uploads_from_uploads,
+    read_user_avatars_from_uploads,
+    replace_gitlab_upload_urls,
+)
 from gitlab_to_forgejo.plan_builder import Plan
 
 
@@ -75,6 +81,48 @@ class _ForgejoRepoOps(_ForgejoOps, Protocol):
         repo: str,
         issue_number: int,
         body: str,
+        sudo: str | None,
+    ) -> Mapping[str, object]: ...
+
+    def edit_issue_body(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        issue_number: int,
+        body: str,
+        sudo: str | None,
+    ) -> Mapping[str, object]: ...
+
+    def edit_issue_comment(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        comment_id: int,
+        body: str,
+        sudo: str | None,
+    ) -> Mapping[str, object]: ...
+
+    def create_issue_attachment(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        issue_number: int,
+        filename: str,
+        content: bytes,
+        sudo: str | None,
+    ) -> Mapping[str, object]: ...
+
+    def create_issue_comment_attachment(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        comment_id: int,
+        filename: str,
+        content: bytes,
         sudo: str | None,
     ) -> Mapping[str, object]: ...
 
@@ -543,6 +591,181 @@ def apply_notes(
     return comment_id_by_gitlab_note_id
 
 
+def apply_issue_and_pr_uploads(
+    plan: Plan,
+    client: _ForgejoRepoOps,
+    *,
+    user_by_id: Mapping[int, str],
+    issue_number_by_gitlab_issue_id: Mapping[int, int],
+    pr_number_by_gitlab_mr_id: Mapping[int, int],
+    upload_bytes_by_upload: Mapping[GitLabProjectUpload, bytes],
+) -> None:
+    del pr_number_by_gitlab_mr_id
+    if not upload_bytes_by_upload:
+        return
+
+    repo_by_project_id = {r.gitlab_project_id: r for r in plan.repos}
+
+    for issue in plan.issues:
+        issue_number = issue_number_by_gitlab_issue_id.get(issue.gitlab_issue_id)
+        if issue_number is None:
+            continue
+        repo = repo_by_project_id.get(issue.gitlab_project_id)
+        if repo is None:
+            raise ValueError(
+                f"no repo found for issue uploads project_id={issue.gitlab_project_id}"
+            )
+
+        sudo = user_by_id.get(issue.author_id)
+        mapping: dict[str, str] = {}
+        seen_urls: set[str] = set()
+        for url, upload_hash, filename in iter_gitlab_upload_urls(issue.description):
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+            upload = GitLabProjectUpload(
+                disk_path=repo.gitlab_disk_path,
+                upload_hash=upload_hash,
+                filename=filename,
+            )
+            content = upload_bytes_by_upload.get(upload)
+            if content is None:
+                continue
+            resp = client.create_issue_attachment(
+                owner=repo.owner,
+                repo=repo.name,
+                issue_number=int(issue_number),
+                filename=filename,
+                content=content,
+                sudo=sudo,
+            )
+            new_url = resp.get("browser_download_url")
+            if new_url:
+                mapping[url] = str(new_url)
+
+        if not mapping:
+            continue
+        new_body = replace_gitlab_upload_urls(issue.description, mapping=mapping)
+        if new_body == issue.description:
+            continue
+        client.edit_issue_body(
+            owner=repo.owner,
+            repo=repo.name,
+            issue_number=int(issue_number),
+            body=new_body,
+            sudo=sudo,
+        )
+
+
+def apply_note_uploads(
+    plan: Plan,
+    client: _ForgejoRepoOps,
+    *,
+    user_by_id: Mapping[int, str],
+    comment_id_by_gitlab_note_id: Mapping[int, int],
+    upload_bytes_by_upload: Mapping[GitLabProjectUpload, bytes],
+) -> None:
+    if not upload_bytes_by_upload:
+        return
+
+    repo_by_project_id = {r.gitlab_project_id: r for r in plan.repos}
+
+    for note in plan.notes:
+        comment_id = comment_id_by_gitlab_note_id.get(note.gitlab_note_id)
+        if comment_id is None:
+            continue
+
+        repo = repo_by_project_id.get(note.gitlab_project_id)
+        if repo is None:
+            raise ValueError(f"no repo found for note uploads project_id={note.gitlab_project_id}")
+
+        sudo = user_by_id.get(note.author_id)
+        mapping: dict[str, str] = {}
+        seen_urls: set[str] = set()
+        for url, upload_hash, filename in iter_gitlab_upload_urls(note.body):
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+            upload = GitLabProjectUpload(
+                disk_path=repo.gitlab_disk_path,
+                upload_hash=upload_hash,
+                filename=filename,
+            )
+            content = upload_bytes_by_upload.get(upload)
+            if content is None:
+                continue
+            resp = client.create_issue_comment_attachment(
+                owner=repo.owner,
+                repo=repo.name,
+                comment_id=int(comment_id),
+                filename=filename,
+                content=content,
+                sudo=sudo,
+            )
+            new_url = resp.get("browser_download_url")
+            if new_url:
+                mapping[url] = str(new_url)
+
+        if not mapping:
+            continue
+        new_body = replace_gitlab_upload_urls(note.body, mapping=mapping)
+        if new_body == note.body:
+            continue
+        client.edit_issue_comment(
+            owner=repo.owner,
+            repo=repo.name,
+            comment_id=int(comment_id),
+            body=new_body,
+            sudo=sudo,
+        )
+
+
+def collect_project_uploads(plan: Plan) -> set[GitLabProjectUpload]:
+    repo_by_project_id = {r.gitlab_project_id: r for r in plan.repos}
+    uploads: set[GitLabProjectUpload] = set()
+
+    for issue in plan.issues:
+        repo = repo_by_project_id.get(issue.gitlab_project_id)
+        if repo is None or not repo.gitlab_disk_path:
+            continue
+        for _, upload_hash, filename in iter_gitlab_upload_urls(issue.description):
+            uploads.add(
+                GitLabProjectUpload(
+                    disk_path=repo.gitlab_disk_path,
+                    upload_hash=upload_hash,
+                    filename=filename,
+                )
+            )
+
+    for mr in plan.merge_requests:
+        repo = repo_by_project_id.get(mr.gitlab_target_project_id)
+        if repo is None or not repo.gitlab_disk_path:
+            continue
+        for _, upload_hash, filename in iter_gitlab_upload_urls(mr.description):
+            uploads.add(
+                GitLabProjectUpload(
+                    disk_path=repo.gitlab_disk_path,
+                    upload_hash=upload_hash,
+                    filename=filename,
+                )
+            )
+
+    for note in plan.notes:
+        repo = repo_by_project_id.get(note.gitlab_project_id)
+        if repo is None or not repo.gitlab_disk_path:
+            continue
+        for _, upload_hash, filename in iter_gitlab_upload_urls(note.body):
+            uploads.add(
+                GitLabProjectUpload(
+                    disk_path=repo.gitlab_disk_path,
+                    upload_hash=upload_hash,
+                    filename=filename,
+                )
+            )
+
+    return uploads
+
+
 def apply_user_avatars(plan: Plan, client: _ForgejoOps, *, user_by_id: Mapping[int, str]) -> None:
     uploads = plan.uploads_tar_path
     if uploads is None:
@@ -692,6 +915,14 @@ def migrate_plan(
         if forgejo_username:
             forgejo_user_by_gitlab_user_id[u.gitlab_user_id] = forgejo_username
 
+    upload_bytes_by_upload: dict[GitLabProjectUpload, bytes] = {}
+    if plan.uploads_tar_path is not None:
+        desired_uploads = collect_project_uploads(plan)
+        if desired_uploads:
+            upload_bytes_by_upload = read_project_uploads_from_uploads(
+                plan.uploads_tar_path, desired=desired_uploads
+            )
+
     apply_user_avatars(plan, client, user_by_id=forgejo_user_by_gitlab_user_id)
 
     apply_repos(plan, client, private=private_repos)
@@ -710,6 +941,21 @@ def migrate_plan(
         user_by_id=forgejo_user_by_gitlab_user_id,
         issue_number_by_gitlab_issue_id=issue_numbers,
         pr_number_by_gitlab_mr_id=pr_numbers,
+    )
+    apply_issue_and_pr_uploads(
+        plan,
+        client,
+        user_by_id=forgejo_user_by_gitlab_user_id,
+        issue_number_by_gitlab_issue_id=issue_numbers,
+        pr_number_by_gitlab_mr_id=pr_numbers,
+        upload_bytes_by_upload=upload_bytes_by_upload,
+    )
+    apply_note_uploads(
+        plan,
+        client,
+        user_by_id=forgejo_user_by_gitlab_user_id,
+        comment_id_by_gitlab_note_id=comment_ids,
+        upload_bytes_by_upload=upload_bytes_by_upload,
     )
     apply_issue_and_mr_labels(
         plan,

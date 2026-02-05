@@ -24,6 +24,7 @@ The format is based on *Keep a Changelog*.
 - Issue + pull request import (from GitLab issues/MRs) with comments/notes attribution via Forgejo `sudo` (`src/gitlab_to_forgejo/migrator.py`, `src/gitlab_to_forgejo/forgejo_client.py`).
 - GitLab label migration: parses `labels` + `label_links`, creates Forgejo repo labels, and assigns them to imported issues/PRs.
 - GitLab user avatar migration: reads avatar files from `uploads.tar.gz` and uploads them via Forgejo `/api/v1/user/avatar` (admin `sudo`).
+- GitLab issue/comment upload migration: rewrites `/uploads/<hash>/<file>` links by uploading the referenced files as Forgejo attachments and patching issue/comment bodies.
 - Wiki repo push: best-effort push of GitLab `*.wiki.git` bundles to Forgejo wiki remotes, mapping the GitLab wiki default branch to Forgejo `main`.
 - Forgejo wiki git repo initializer (`src/gitlab_to_forgejo/forgejo_wiki.py`) so wiki pushes work on a fresh Forgejo volume.
 - MR head-branch preparation: pushes deterministic `gitlab-mr-iid-<iid>` branches for merged MRs whose source branches are missing.

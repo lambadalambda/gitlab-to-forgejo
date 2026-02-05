@@ -119,6 +119,7 @@ Acceptance:
   - [x] labels
   - [ ] milestones, assignees
   - [x] comments (notes)
+  - [x] migrate GitLab `/uploads/...` attachments referenced in Markdown (issue bodies + comments)
   - [x] state (open/closed) + timestamps (`created_at`/`updated_at`/`closed_at`) backfilled via Forgejo DB post-processing
 - [x] Implement MR import (as Forgejo pull requests) (MVP):
   - [x] ensure PR head branches exist:

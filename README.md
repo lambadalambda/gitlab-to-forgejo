@@ -10,7 +10,7 @@ Docker Compose + Python migrator to import a **GitLab backup** (repos, wikis, us
 
 ## Status
 
-- Implemented: create Forgejo users/orgs/teams, upload user avatars, create org repos, push Git data from `*.bundle`, initialize + push wiki git data when present, import issues/MRs with comments, migrate labels, and backfill issue/comment timestamps + issue open/closed state via DB post-processing.
+- Implemented: create Forgejo users/orgs/teams, upload user avatars, create org repos, push Git data from `*.bundle`, initialize + push wiki git data when present, import issues/MRs with comments, migrate labels, migrate `/uploads/...` attachments referenced in issue/comment Markdown, and backfill issue/comment timestamps + issue open/closed state via DB post-processing.
 
 ## Development
 
