@@ -57,6 +57,20 @@ If ports are already in use, override with:
 
 - `FORGEJO_HTTP_PORT=3001 FORGEJO_SSH_PORT=2223 mise run up`
 
+## Moving to Coolify (post-migration)
+
+For production handoff, keep this migration stack as the source of truth, then lift-and-shift Forgejo data into Coolify:
+
+1. Pick the final public domain and set Forgejo canonical URL settings there (`ROOT_URL`, `DOMAIN`, `SSH_DOMAIN`) in your Coolify Forgejo app.
+2. Stop writes on the source stack (`docker compose stop forgejo`) so DB + git data stay consistent.
+3. Export source data:
+   - DB: `docker compose exec -T db pg_dump -U forgejo -d forgejo > forgejo.sql`
+   - Forgejo data dir: `docker compose cp forgejo:/data ./forgejo-data`
+4. In Coolify, deploy Forgejo + Postgres with persistent volumes, restore `forgejo.sql` into Postgres, and copy `forgejo-data` into Forgejo's `/data`.
+5. Start the Coolify app and validate login, repos, issues, PRs, SSH clone/push, and avatars/uploads.
+
+Important: preserve Forgejo secrets from `/data/gitea/conf/app.ini` (or equivalent env) when moving instances. Changing secrets after migration can break encrypted data (tokens, OAuth secrets, etc.).
+
 ## Performance notes
 
 Import performance depends heavily on the Forgejo instance configuration. By default this repo starts Forgejo in a migration-friendly mode:
