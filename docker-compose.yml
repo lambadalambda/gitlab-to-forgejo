@@ -33,6 +33,11 @@ services:
 
       FORGEJO__security__INSTALL_LOCK: "true"
       FORGEJO__service__DISABLE_REGISTRATION: "true"
+      FORGEJO__service__AUTO_WATCH_NEW_REPOS: "${FORGEJO_AUTO_WATCH_NEW_REPOS:-false}"
+      FORGEJO__service__AUTO_WATCH_ON_CHANGES: "${FORGEJO_AUTO_WATCH_ON_CHANGES:-false}"
+      FORGEJO__actions__ENABLED: "${FORGEJO_ACTIONS_ENABLED:-false}"
+      FORGEJO__service__ENABLE_NOTIFY_MAIL: "${FORGEJO_ENABLE_NOTIFY_MAIL:-false}"
+      FORGEJO__other__ENABLE_FEED: "${FORGEJO_ENABLE_FEED:-false}"
 
       # Migration performance knobs (override via env when starting Compose)
       FORGEJO__queue__TYPE: "${FORGEJO_QUEUE_TYPE:-channel}"

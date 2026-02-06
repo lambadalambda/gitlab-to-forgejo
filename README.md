@@ -52,6 +52,11 @@ Import performance depends heavily on the Forgejo instance configuration. By def
 
 - `FORGEJO__queue__TYPE=channel` (in-memory queues; faster than disk-backed `level` queues)
 - `FORGEJO__indexer__ISSUE_INDEXER_TYPE=db` (avoid Bleve indexing overhead during import)
+- `FORGEJO__service__AUTO_WATCH_NEW_REPOS=false` and `FORGEJO__service__AUTO_WATCH_ON_CHANGES=false` (avoid auto-subscribing large user sets as repo watchers during import)
+- `FORGEJO__actions__ENABLED=false` (skip Actions workflow detection on issue/comment events during import)
+- `FORGEJO__service__ENABLE_NOTIFY_MAIL=false` and `FORGEJO__other__ENABLE_FEED=false` (disable email notifications and hide feed UI)
+
+Note: Forgejo still writes some internal activity/notification rows on issue/comment creation; these defaults primarily avoid the worst fan-out path (`watch`-driven notifications/actions) and speed up large imports.
 
 To override (e.g. to enable Bleve issue search after import), restart Forgejo with:
 
