@@ -68,6 +68,10 @@ def _format_duration(seconds: float) -> str:
 class _ForgejoOps(Protocol):
     def ensure_user(self, *, username: str, email: str, full_name: str, password: str) -> None: ...
 
+    def create_user_ssh_key(
+        self, *, title: str, key: str, sudo: str | None
+    ) -> Mapping[str, object]: ...
+
     def update_user_avatar(self, *, image_b64: str, sudo: str | None) -> None: ...
 
     def ensure_org(self, *, org: str, full_name: str, description: str | None) -> None: ...
@@ -251,6 +255,18 @@ def _is_username_creation_error(err: ForgejoError) -> bool:
         return False
     msg = err.body.lower()
     return ("reserved" in msg or "invalid" in msg) and ("name" in msg or "username" in msg)
+
+
+def _is_duplicate_ssh_key_error(err: ForgejoError) -> bool:
+    if err.status_code != 422:
+        return False
+    msg = " ".join(err.body.lower().split())
+    return (
+        "already exist" in msg
+        or "already used" in msg
+        or "has been used as non-deploy key" in msg
+        or "name has been used" in msg
+    )
 
 
 def _is_transient_target_not_found(err: ForgejoError) -> bool:
@@ -1718,6 +1734,44 @@ def collect_project_uploads(plan: Plan) -> set[GitLabProjectUpload]:
     return uploads
 
 
+def apply_user_ssh_keys(plan: Plan, client: _ForgejoOps, *, user_by_id: Mapping[int, str]) -> None:
+    if not plan.user_ssh_keys:
+        return
+
+    logger.info("Importing user SSH keys (%d)", len(plan.user_ssh_keys))
+    for key_plan in plan.user_ssh_keys:
+        sudo = user_by_id.get(key_plan.gitlab_user_id)
+        if not sudo:
+            continue
+        try:
+            client.create_user_ssh_key(title=key_plan.title, key=key_plan.key, sudo=sudo)
+        except ForgejoError as err:
+            if _is_duplicate_ssh_key_error(err):
+                logger.info(
+                    "Create SSH key skipped (already exists/skipping) gitlab key id=%s sudo=%s",
+                    key_plan.gitlab_key_id,
+                    sudo,
+                )
+                continue
+            logger.error(
+                "Create SSH key failed for gitlab key id=%s user id=%s sudo=%s status=%s body=%r",
+                key_plan.gitlab_key_id,
+                key_plan.gitlab_user_id,
+                sudo,
+                err.status_code,
+                err.body,
+            )
+            continue
+        except Exception:
+            logger.exception(
+                "Create SSH key failed for gitlab key id=%s user id=%s sudo=%s",
+                key_plan.gitlab_key_id,
+                key_plan.gitlab_user_id,
+                sudo,
+            )
+            continue
+
+
 def apply_user_avatars(plan: Plan, client: _ForgejoOps, *, user_by_id: Mapping[int, str]) -> None:
     uploads = plan.uploads_tar_path
     if uploads is None:
@@ -1980,6 +2034,16 @@ def migrate_plan(
         if forgejo_username:
             forgejo_user_by_gitlab_user_id[u.gitlab_user_id] = forgejo_username
 
+    users_with_gitlab_2fa = sum(1 for u in plan.users if u.gitlab_otp_required_for_login)
+    if users_with_gitlab_2fa:
+        logger.warning(
+            "GitLab 2FA not migrated for %d users; users must re-enroll 2FA in Forgejo.",
+            users_with_gitlab_2fa,
+        )
+
+    with _phase("User SSH keys"):
+        apply_user_ssh_keys(plan, client, user_by_id=forgejo_user_by_gitlab_user_id)
+
     if migrate_password_hashes:
         sql = build_password_hash_fix_sql(
             plan,
@@ -2078,6 +2142,9 @@ def migrate_plan(
         issue_number_by_gitlab_issue_id=issue_numbers,
         pr_number_by_gitlab_mr_id=pr_numbers,
         comment_id_by_gitlab_note_id=comment_ids,
+        include_issues=not fast_db_issues,
+        include_merge_requests=True,
+        include_notes=not fast_db_issues,
     )
     logger.info(
         "Metadata backfill: issues=%d prs=%d comments=%d sql_bytes=%d",

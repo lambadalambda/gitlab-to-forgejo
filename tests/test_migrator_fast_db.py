@@ -69,6 +69,7 @@ def test_migrate_plan_uses_fast_db_issue_and_note_paths_when_enabled() -> None:
 
     with (
         patch("gitlab_to_forgejo.migrator.apply_plan", return_value={"alice": "alice"}),
+        patch("gitlab_to_forgejo.migrator.apply_user_ssh_keys") as apply_user_ssh_keys,
         patch("gitlab_to_forgejo.migrator.apply_user_avatars"),
         patch("gitlab_to_forgejo.migrator.apply_repos"),
         patch("gitlab_to_forgejo.migrator.ensure_repo_labels"),
@@ -89,7 +90,7 @@ def test_migrate_plan_uses_fast_db_issue_and_note_paths_when_enabled() -> None:
         patch("gitlab_to_forgejo.migrator.apply_issue_and_pr_uploads"),
         patch("gitlab_to_forgejo.migrator.apply_note_uploads"),
         patch("gitlab_to_forgejo.migrator.apply_issue_and_mr_labels"),
-        patch("gitlab_to_forgejo.migrator.build_metadata_fix_sql", return_value=""),
+        patch("gitlab_to_forgejo.migrator.build_metadata_fix_sql", return_value="") as meta_sql,
         patch("gitlab_to_forgejo.migrator.apply_metadata_fix_sql"),
     ):
         migrate_plan(
@@ -107,3 +108,7 @@ def test_migrate_plan_uses_fast_db_issue_and_note_paths_when_enabled() -> None:
     apply_notes_db_fast.assert_called_once()
     apply_issues.assert_not_called()
     apply_notes.assert_not_called()
+    apply_user_ssh_keys.assert_called_once()
+    assert meta_sql.call_args.kwargs["include_issues"] is False
+    assert meta_sql.call_args.kwargs["include_notes"] is False
+    assert meta_sql.call_args.kwargs["include_merge_requests"] is True

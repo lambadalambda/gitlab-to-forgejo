@@ -36,6 +36,8 @@ The format is based on *Keep a Changelog*.
 - Best-effort migration runs: the migrator continues on per-entity failures and writes errors to `state/errors.log` (override via `--errors-log` / `FORGEJO_ERRORS_LOG`).
 - Migration progress logging: phase/timing logs at INFO level to make long runs easier to follow.
 - Optional issue/comment DB fast-path import: `--fast-db-issues` (or `FORGEJO_FAST_DB_ISSUES=1`) inserts issues/comments directly into Forgejo DB tables for significantly faster large-repo migration runs, with fallback to API mode on DB-step failure.
+- GitLab user SSH key migration (`keys` table): user-owned SSH keys are imported through Forgejo's user key API.
+- 2FA portability warning: logs users with GitLab 2FA enabled and notes that backup-only migration cannot preserve GitLab TOTP/WebAuthn credentials.
 
 ### Fixed
 
@@ -54,3 +56,4 @@ The format is based on *Keep a Changelog*.
 - MR import no longer fails with Forgejo 409 "pull request already exists for these targets" when GitLab reuses branch names: the migrator now prefers per-MR synthetic head branches `gitlab-mr-iid-<iid>` sourced from `merge_request_diffs.head_commit_sha` or `refs/merge-requests/<iid>/head` when available.
 - Docker Compose now defaults to migration-friendly Forgejo settings (`queue.TYPE=channel`, `indexer.ISSUE_INDEXER_TYPE=db`) to speed up large imports.
 - Docker Compose now also defaults to migration-friendly notification settings (`service.AUTO_WATCH_NEW_REPOS=false`, `service.AUTO_WATCH_ON_CHANGES=false`, `actions.ENABLED=false`, `service.ENABLE_NOTIFY_MAIL=false`, `other.ENABLE_FEED=false`) to reduce issue/comment import fan-out overhead.
+- Fast DB issue/comment mode now skips redundant issue/comment metadata backfill SQL and only backfills MR metadata.

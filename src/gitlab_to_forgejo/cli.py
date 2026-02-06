@@ -153,6 +153,12 @@ def _filter_plan_to_single_repo(plan: Plan, *, only_repo: str) -> Plan:
         for u in plan.users
         if u.gitlab_user_id in interacting_user_ids or u.username in member_usernames
     ]
+    selected_user_ids = {u.gitlab_user_id for u in users}
+    user_ssh_keys = [
+        key_plan
+        for key_plan in plan.user_ssh_keys
+        if key_plan.gitlab_user_id in selected_user_ids
+    ]
 
     issue_label_ids_by_gitlab_issue_id_sorted = {
         issue_id: issue_label_ids_by_gitlab_issue_id[issue_id]
@@ -177,6 +183,9 @@ def _filter_plan_to_single_repo(plan: Plan, *, only_repo: str) -> Plan:
         labels=sorted(labels, key=lambda label: (label.title.lower(), label.gitlab_label_id)),
         issue_label_ids_by_gitlab_issue_id=issue_label_ids_by_gitlab_issue_id_sorted,
         mr_label_ids_by_gitlab_mr_id=mr_label_ids_by_gitlab_mr_id_sorted,
+        user_ssh_keys=sorted(
+            user_ssh_keys, key=lambda key_plan: (key_plan.gitlab_user_id, key_plan.gitlab_key_id)
+        ),
     )
 
 

@@ -13,6 +13,7 @@ from gitlab_to_forgejo.plan_builder import (
     Plan,
     RepoPlan,
     UserPlan,
+    UserSSHKeyPlan,
 )
 
 
@@ -266,6 +267,20 @@ def test_filter_plan_to_single_repo_filters_labels_and_keeps_uploads_path(tmp_pa
         ],
         issue_label_ids_by_gitlab_issue_id={100: (10,), 101: (11,)},
         mr_label_ids_by_gitlab_mr_id={200: (11,)},
+        user_ssh_keys=[
+            UserSSHKeyPlan(
+                gitlab_key_id=1,
+                gitlab_user_id=1,
+                title="alice-laptop",
+                key="ssh-ed25519 AAAAC3NzaAlice== alice@example.test",
+            ),
+            UserSSHKeyPlan(
+                gitlab_key_id=2,
+                gitlab_user_id=2,
+                title="bob-laptop",
+                key="ssh-ed25519 AAAAC3NzaBob== bob@example.test",
+            ),
+        ],
     )
 
     filtered = cli._filter_plan_to_single_repo(plan, only_repo="pleroma/docs")
@@ -275,3 +290,4 @@ def test_filter_plan_to_single_repo_filters_labels_and_keeps_uploads_path(tmp_pa
     assert filtered.issue_label_ids_by_gitlab_issue_id == {100: (10,)}
     assert filtered.mr_label_ids_by_gitlab_mr_id == {}
     assert [label.gitlab_label_id for label in filtered.labels] == [10]
+    assert [key.gitlab_key_id for key in filtered.user_ssh_keys] == [1]

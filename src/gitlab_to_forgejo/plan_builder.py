@@ -38,6 +38,15 @@ class UserPlan:
     state: str
     avatar: str | None = None
     gitlab_encrypted_password: str | None = None
+    gitlab_otp_required_for_login: bool = False
+
+
+@dataclass(frozen=True)
+class UserSSHKeyPlan:
+    gitlab_key_id: int
+    gitlab_user_id: int
+    title: str
+    key: str
 
 
 @dataclass(frozen=True)
@@ -107,6 +116,7 @@ class Plan:
     labels: list[LabelPlan] = field(default_factory=list)
     issue_label_ids_by_gitlab_issue_id: dict[int, tuple[int, ...]] = field(default_factory=dict)
     mr_label_ids_by_gitlab_mr_id: dict[int, tuple[int, ...]] = field(default_factory=dict)
+    user_ssh_keys: list[UserSSHKeyPlan] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -312,7 +322,7 @@ def build_plan(backup_root: Path, *, root_group_path: str) -> Plan:
     if descendant_group_ids is None:
         raise ValueError("did not find any projects; unable to derive descendant group set")
 
-    # pass 2: members/issues/MRs/notes/users
+    # pass 2: members/issues/MRs/notes/users/keys
     direct_members: dict[int, dict[int, int]] = {gid: {} for gid in descendant_group_ids}
     interacting_user_ids: set[int] = set()
 
@@ -325,10 +335,11 @@ def build_plan(backup_root: Path, *, root_group_path: str) -> Plan:
     merge_request_diff_ids: set[int] = set()
     notes: list[NotePlan] = []
     users_by_id: dict[int, UserPlan] = {}
+    user_ssh_keys: list[UserSSHKeyPlan] = []
     labels_by_id: dict[int, LabelPlan] = {}
 
     for table, row in iter_copy_rows(
-        db_path, tables={"members", "issues", "merge_requests", "notes", "users", "labels"}
+        db_path, tables={"members", "issues", "merge_requests", "notes", "users", "labels", "keys"}
     ):
         if table == "members":
             if row["source_type"] != "Namespace":
@@ -450,6 +461,7 @@ def build_plan(backup_root: Path, *, root_group_path: str) -> Plan:
             if user_id not in interacting_user_ids:
                 continue
             encrypted_password = row.get("encrypted_password") or None
+            otp_required = (row.get("otp_required_for_login") or "").lower() == "t"
             users_by_id[user_id] = UserPlan(
                 gitlab_user_id=user_id,
                 username=row["username"] or "",
@@ -458,6 +470,39 @@ def build_plan(backup_root: Path, *, root_group_path: str) -> Plan:
                 state=row["state"] or "",
                 avatar=row.get("avatar") or None,
                 gitlab_encrypted_password=encrypted_password,
+                gitlab_otp_required_for_login=otp_required,
+            )
+        elif table == "keys":
+            key_id_raw = row.get("id")
+            user_id_raw = row.get("user_id")
+            if key_id_raw is None or user_id_raw is None:
+                continue
+            try:
+                key_id = int(key_id_raw)
+                user_id = int(user_id_raw)
+            except ValueError:
+                continue
+            if user_id not in interacting_user_ids:
+                continue
+
+            key_type = (row.get("type") or "").strip().lower()
+            if key_type and key_type != "key":
+                continue
+
+            key = (row.get("key") or "").strip()
+            if not key:
+                continue
+            if not (key.startswith("ssh-") or key.startswith("ecdsa-") or key.startswith("sk-")):
+                continue
+
+            title = (row.get("title") or "").strip() or f"gitlab-key-{key_id}"
+            user_ssh_keys.append(
+                UserSSHKeyPlan(
+                    gitlab_key_id=key_id,
+                    gitlab_user_id=user_id,
+                    title=title,
+                    key=key,
+                )
             )
         elif table == "labels":
             label_id_raw = row.get("id")
@@ -493,6 +538,9 @@ def build_plan(backup_root: Path, *, root_group_path: str) -> Plan:
             )
 
     users = sorted(users_by_id.values(), key=lambda u: u.username)
+    user_ssh_keys = sorted(
+        user_ssh_keys, key=lambda key_plan: (key_plan.gitlab_user_id, key_plan.gitlab_key_id)
+    )
 
     # pass 2.5: label_links (issue/MR label assignments)
     issue_label_ids: dict[int, list[int]] = {}
@@ -645,4 +693,5 @@ def build_plan(backup_root: Path, *, root_group_path: str) -> Plan:
         labels=labels,
         issue_label_ids_by_gitlab_issue_id=issue_label_ids_by_gitlab_issue_id,
         mr_label_ids_by_gitlab_mr_id=mr_label_ids_by_gitlab_mr_id,
+        user_ssh_keys=user_ssh_keys,
     )

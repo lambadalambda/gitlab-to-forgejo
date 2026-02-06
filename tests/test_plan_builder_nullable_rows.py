@@ -10,6 +10,10 @@ def _fixture_backup_root() -> Path:
     return Path(__file__).resolve().parents[1] / "fixtures/gitlab-mini"
 
 
+def _pass2_tables() -> set[str]:
+    return {"members", "issues", "merge_requests", "notes", "users", "labels", "keys"}
+
+
 def test_build_plan_ignores_null_member_user_id_and_infers_note_project_id() -> None:
     expected = plan_builder.build_plan(_fixture_backup_root(), root_group_path="pleroma")
 
@@ -17,7 +21,7 @@ def test_build_plan_ignores_null_member_user_id_and_infers_note_project_id() -> 
 
     def injected_iter_copy_rows(path: Path, *, tables: set[str]):
         yield from original(path, tables=tables)
-        if tables == {"members", "issues", "merge_requests", "notes", "users", "labels"}:
+        if tables == _pass2_tables():
             yield "members", {
                 "source_type": "Namespace",
                 "source_id": "3",
@@ -57,7 +61,7 @@ def test_build_plan_reads_merge_request_base_commit_sha_from_merge_request_diffs
 
     def injected_iter_copy_rows(path: Path, *, tables: set[str]):
         yield from original(path, tables=tables)
-        if tables == {"members", "issues", "merge_requests", "notes", "users", "labels"}:
+        if tables == _pass2_tables():
             yield "merge_requests", {
                 "id": mr_id,
                 "iid": "999",
@@ -97,7 +101,7 @@ def test_build_plan_reads_user_encrypted_password() -> None:
 
     def injected_iter_copy_rows(path: Path, *, tables: set[str]):
         yield from original(path, tables=tables)
-        if tables == {"members", "issues", "merge_requests", "notes", "users", "labels"}:
+        if tables == _pass2_tables():
             yield "users", {
                 "id": "43",
                 "username": "lanodan",

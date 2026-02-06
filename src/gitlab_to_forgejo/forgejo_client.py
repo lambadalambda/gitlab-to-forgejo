@@ -449,6 +449,22 @@ class ForgejoClient:
             json={"image": image_b64},
         )
 
+    def create_user_ssh_key(
+        self,
+        *,
+        title: str,
+        key: str,
+        sudo: str | None = None,
+    ) -> dict[str, Any]:
+        data = self._request_json(
+            "POST",
+            "/user/keys",
+            params={"sudo": sudo} if sudo else None,
+            json={"title": title, "key": key},
+        )
+        assert isinstance(data, dict)
+        return data
+
     def list_repo_labels(self, *, owner: str, repo: str) -> list[dict[str, Any]]:
         data = self._request_json("GET", f"/repos/{owner}/{repo}/labels")
         assert isinstance(data, list)

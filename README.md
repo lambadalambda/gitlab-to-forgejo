@@ -10,7 +10,7 @@ Docker Compose + Python migrator to import a **GitLab backup** (repos, wikis, us
 
 ## Status
 
-- Implemented: create Forgejo users/orgs/teams, upload user avatars, create org repos, push Git data from `*.bundle`, initialize + push wiki git data when present, import issues/MRs with comments, migrate labels, migrate `/uploads/...` attachments referenced in issue/comment Markdown, and backfill issue/comment timestamps + issue open/closed state via DB post-processing.
+- Implemented: create Forgejo users/orgs/teams, migrate user SSH keys, upload user avatars, create org repos, push Git data from `*.bundle`, initialize + push wiki git data when present, import issues/MRs with comments, migrate labels, migrate `/uploads/...` attachments referenced in issue/comment Markdown, and backfill issue/comment timestamps + issue open/closed state via DB post-processing.
 
 ## Development
 
@@ -47,6 +47,11 @@ To enable the issue/comment DB fast-path (bypasses Forgejo issue/comment create 
 
 - `FORGEJO_FAST_DB_ISSUES=1 mise run migrate-real`
 - `gitlab-to-forgejo migrate --fast-db-issues ...`
+
+2FA/WebAuthn note:
+
+- SSH keys are migrated.
+- GitLab 2FA secrets and WebAuthn registrations are not migrated from backup-only data; users must re-enroll 2FA in Forgejo.
 
 If ports are already in use, override with:
 
