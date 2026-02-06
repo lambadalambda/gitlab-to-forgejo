@@ -11,6 +11,8 @@ from typing import Protocol
 from gitlab_to_forgejo.forgejo_client import ForgejoError
 from gitlab_to_forgejo.forgejo_db import (
     apply_metadata_fix_sql,
+    build_fast_issue_import_sql,
+    build_fast_note_import_sql,
     build_metadata_fix_sql,
     build_password_hash_fix_sql,
 )
@@ -444,7 +446,8 @@ def apply_plan(plan: Plan, client: _ForgejoOps, *, user_password: str) -> dict[s
                         client.add_team_member(team_id=team_id, username=username)
                     except ForgejoError as err:
                         logger.error(
-                            "Add team member failed org=%s team=Maintainers user=%s status=%s body=%r",
+                            "Add team member failed org=%s team=Maintainers "
+                            "user=%s status=%s body=%r",
                             org.name,
                             username,
                             err.status_code,
@@ -482,7 +485,8 @@ def apply_plan(plan: Plan, client: _ForgejoOps, *, user_password: str) -> dict[s
                         client.add_team_member(team_id=team_id, username=username)
                     except ForgejoError as err:
                         logger.error(
-                            "Add team member failed org=%s team=Developers user=%s status=%s body=%r",
+                            "Add team member failed org=%s team=Developers "
+                            "user=%s status=%s body=%r",
                             org.name,
                             username,
                             err.status_code,
@@ -520,7 +524,8 @@ def apply_plan(plan: Plan, client: _ForgejoOps, *, user_password: str) -> dict[s
                         client.add_team_member(team_id=team_id, username=username)
                     except ForgejoError as err:
                         logger.error(
-                            "Add team member failed org=%s team=Reporters user=%s status=%s body=%r",
+                            "Add team member failed org=%s team=Reporters "
+                            "user=%s status=%s body=%r",
                             org.name,
                             username,
                             err.status_code,
@@ -744,6 +749,29 @@ def apply_issues(
     return issue_number_by_gitlab_issue_id
 
 
+def apply_issues_db_fast(
+    plan: Plan, client: _ForgejoRepoOps, *, user_by_id: Mapping[int, str]
+) -> dict[int, int]:
+    issue_number_by_gitlab_issue_id = {
+        issue.gitlab_issue_id: issue.gitlab_issue_iid for issue in plan.issues
+    }
+    sql = build_fast_issue_import_sql(
+        plan,
+        issue_number_by_gitlab_issue_id=issue_number_by_gitlab_issue_id,
+        forgejo_username_by_gitlab_user_id=user_by_id,
+    )
+    if not sql:
+        return {}
+
+    logger.info("Importing issues via DB fast-path (%d)", len(issue_number_by_gitlab_issue_id))
+    try:
+        apply_metadata_fix_sql(sql)
+    except Exception:
+        logger.exception("Fast DB issue import failed; falling back to API issue import")
+        return apply_issues(plan, client, user_by_id=user_by_id)
+    return issue_number_by_gitlab_issue_id
+
+
 def apply_merge_requests(
     plan: Plan, client: _ForgejoRepoOps, *, user_by_id: Mapping[int, str]
 ) -> dict[int, int]:
@@ -949,7 +977,8 @@ def apply_merge_requests(
                         )
                     except Exception:
                         logger.exception(
-                            "Create MR issue fallback failed for %s/%s GitLab MR !%s (id=%s) sudo=%s",
+                            "Create MR issue fallback failed for %s/%s GitLab MR !%s "
+                            "(id=%s) sudo=%s",
                             repo.owner,
                             repo.name,
                             mr.gitlab_mr_iid,
@@ -997,7 +1026,8 @@ def apply_merge_requests(
                         )
                     except Exception:
                         logger.exception(
-                            "Create MR issue fallback failed for %s/%s GitLab MR !%s (id=%s) sudo=%s",
+                            "Create MR issue fallback failed for %s/%s GitLab MR !%s "
+                            "(id=%s) sudo=%s",
                             repo.owner,
                             repo.name,
                             mr.gitlab_mr_iid,
@@ -1058,7 +1088,8 @@ def apply_merge_requests(
                         )
                     except Exception:
                         logger.exception(
-                            "Create MR issue fallback failed for %s/%s GitLab MR !%s (id=%s) sudo=%s",
+                            "Create MR issue fallback failed for %s/%s GitLab MR !%s "
+                            "(id=%s) sudo=%s",
                             repo.owner,
                             repo.name,
                             mr.gitlab_mr_iid,
@@ -1210,7 +1241,8 @@ def apply_notes(
             continue
         except Exception:
             logger.exception(
-                "Create comment failed for %s/%s GitLab note %s on %s %s (forgejo issue/pr #%s) sudo=%s",
+                "Create comment failed for %s/%s GitLab note %s on %s %s "
+                "(forgejo issue/pr #%s) sudo=%s",
                 repo.owner,
                 repo.name,
                 note.gitlab_note_id,
@@ -1224,6 +1256,38 @@ def apply_notes(
         if comment_id_raw is not None:
             comment_id_by_gitlab_note_id[note.gitlab_note_id] = int(comment_id_raw)
 
+    return comment_id_by_gitlab_note_id
+
+
+def apply_notes_db_fast(
+    plan: Plan,
+    client: _ForgejoRepoOps,
+    *,
+    user_by_id: Mapping[int, str],
+    issue_number_by_gitlab_issue_id: Mapping[int, int],
+    pr_number_by_gitlab_mr_id: Mapping[int, int],
+) -> dict[int, int]:
+    sql, comment_id_by_gitlab_note_id = build_fast_note_import_sql(
+        plan,
+        issue_number_by_gitlab_issue_id=issue_number_by_gitlab_issue_id,
+        pr_number_by_gitlab_mr_id=pr_number_by_gitlab_mr_id,
+        forgejo_username_by_gitlab_user_id=user_by_id,
+    )
+    if not sql:
+        return {}
+
+    logger.info("Importing notes/comments via DB fast-path (%d)", len(comment_id_by_gitlab_note_id))
+    try:
+        apply_metadata_fix_sql(sql)
+    except Exception:
+        logger.exception("Fast DB note import failed; falling back to API note import")
+        return apply_notes(
+            plan,
+            client,
+            user_by_id=user_by_id,
+            issue_number_by_gitlab_issue_id=issue_number_by_gitlab_issue_id,
+            pr_number_by_gitlab_mr_id=pr_number_by_gitlab_mr_id,
+        )
     return comment_id_by_gitlab_note_id
 
 
@@ -1293,7 +1357,8 @@ def apply_issue_and_pr_uploads(
                 continue
             except Exception:
                 logger.exception(
-                    "Create issue attachment failed for %s/%s GitLab issue #%s (id=%s) filename=%s sudo=%s",
+                    "Create issue attachment failed for %s/%s GitLab issue #%s (id=%s) "
+                    "filename=%s sudo=%s",
                     repo.owner,
                     repo.name,
                     issue.gitlab_issue_iid,
@@ -1335,7 +1400,8 @@ def apply_issue_and_pr_uploads(
             continue
         except Exception:
             logger.exception(
-                "Edit issue body failed for %s/%s GitLab issue #%s (id=%s) forgejo issue #%s sudo=%s",
+                "Edit issue body failed for %s/%s GitLab issue #%s (id=%s) "
+                "forgejo issue #%s sudo=%s",
                 repo.owner,
                 repo.name,
                 issue.gitlab_issue_iid,
@@ -1397,7 +1463,8 @@ def apply_issue_and_pr_uploads(
                 continue
             except Exception:
                 logger.exception(
-                    "Create PR attachment failed for %s/%s GitLab MR !%s (id=%s) filename=%s sudo=%s",
+                    "Create PR attachment failed for %s/%s GitLab MR !%s (id=%s) "
+                    "filename=%s sudo=%s",
                     repo.owner,
                     repo.name,
                     mr.gitlab_mr_iid,
@@ -1544,7 +1611,8 @@ def apply_note_uploads(
                     continue
                 except Exception:
                     logger.exception(
-                        "Create comment attachment failed for %s/%s GitLab note %s filename=%s sudo=%s",
+                        "Create comment attachment failed for %s/%s GitLab note %s "
+                        "filename=%s sudo=%s",
                         repo.owner,
                         repo.name,
                         note.gitlab_note_id,
@@ -1888,9 +1956,11 @@ def migrate_plan(
     git_username: str,
     git_token: str,
     migrate_password_hashes: bool = False,
+    fast_db_issues: bool = False,
 ) -> None:
     logger.info(
-        "Starting migration (backup_id=%s): orgs=%d repos=%d users=%d issues=%d mrs=%d notes=%d labels=%d",
+        "Starting migration (backup_id=%s): orgs=%d repos=%d users=%d "
+        "issues=%d mrs=%d notes=%d labels=%d",
         plan.backup_id,
         len(plan.orgs),
         len(plan.repos),
@@ -1954,17 +2024,31 @@ def migrate_plan(
         )
 
     with _phase("Issues"):
-        issue_numbers = apply_issues(plan, client, user_by_id=forgejo_user_by_gitlab_user_id)
+        if fast_db_issues:
+            issue_numbers = apply_issues_db_fast(
+                plan, client, user_by_id=forgejo_user_by_gitlab_user_id
+            )
+        else:
+            issue_numbers = apply_issues(plan, client, user_by_id=forgejo_user_by_gitlab_user_id)
     with _phase("Merge requests"):
         pr_numbers = apply_merge_requests(plan, client, user_by_id=forgejo_user_by_gitlab_user_id)
     with _phase("Notes/comments"):
-        comment_ids = apply_notes(
-            plan,
-            client,
-            user_by_id=forgejo_user_by_gitlab_user_id,
-            issue_number_by_gitlab_issue_id=issue_numbers,
-            pr_number_by_gitlab_mr_id=pr_numbers,
-        )
+        if fast_db_issues:
+            comment_ids = apply_notes_db_fast(
+                plan,
+                client,
+                user_by_id=forgejo_user_by_gitlab_user_id,
+                issue_number_by_gitlab_issue_id=issue_numbers,
+                pr_number_by_gitlab_mr_id=pr_numbers,
+            )
+        else:
+            comment_ids = apply_notes(
+                plan,
+                client,
+                user_by_id=forgejo_user_by_gitlab_user_id,
+                issue_number_by_gitlab_issue_id=issue_numbers,
+                pr_number_by_gitlab_mr_id=pr_numbers,
+            )
     with _phase("Issue/PR uploads"):
         apply_issue_and_pr_uploads(
             plan,

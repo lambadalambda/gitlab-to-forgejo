@@ -35,12 +35,18 @@ For faster iteration, restrict migration to a single repo:
 
 - `GITLAB_ONLY_REPO=pleroma/docs mise run migrate-real`
 - `GITLAB_ONLY_REPO=pleroma/docs mise run migrate` (fixture)
+- `GITLAB_ONLY_REPO=pleroma/pleroma-fe FORGEJO_FAST_DB_ISSUES=1 mise run migrate-real` (single-repo + fast DB issue/comment import)
 
 The migrator is best-effort: it continues on per-entity failures and logs errors to the terminal and `state/errors.log` (override via `FORGEJO_ERRORS_LOG` or `--errors-log`).
 
 To (best-effort) preserve GitLab user passwords by copying bcrypt hashes into Forgejo via DB update (opt-in):
 
 - `FORGEJO_MIGRATE_PASSWORD_HASHES=1 mise run migrate-real`
+
+To enable the issue/comment DB fast-path (bypasses Forgejo issue/comment create APIs and their hooks):
+
+- `FORGEJO_FAST_DB_ISSUES=1 mise run migrate-real`
+- `gitlab-to-forgejo migrate --fast-db-issues ...`
 
 If ports are already in use, override with:
 

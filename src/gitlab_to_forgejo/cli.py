@@ -9,7 +9,6 @@ from gitlab_to_forgejo.forgejo_client import ForgejoClient
 from gitlab_to_forgejo.migrator import migrate_plan
 from gitlab_to_forgejo.plan_builder import Plan, build_plan
 
-
 _STREAM_LOG_HANDLER_NAME = "gitlab_to_forgejo_stream"
 _ERRORS_FILE_HANDLER_NAME = "gitlab_to_forgejo_errors_file"
 
@@ -248,6 +247,15 @@ def _build_parser() -> argparse.ArgumentParser:
             "FORGEJO_MIGRATE_PASSWORD_HASHES=1)."
         ),
     )
+    migrate.add_argument(
+        "--fast-db-issues",
+        action=argparse.BooleanOptionalAction,
+        default=_env_truthy("FORGEJO_FAST_DB_ISSUES", default=False),
+        help=(
+            "Import issues/comments via direct DB inserts (faster, bypasses Forgejo API "
+            "notification hooks). Intended for migration runs."
+        ),
+    )
 
     return parser
 
@@ -274,6 +282,7 @@ def main(argv: list[str] | None = None) -> int:
             git_username=args.git_username,
             git_token=token,
             migrate_password_hashes=args.migrate_password_hashes,
+            fast_db_issues=args.fast_db_issues,
         )
         return 0
 

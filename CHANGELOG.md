@@ -35,6 +35,7 @@ The format is based on *Keep a Changelog*.
 - Contextual error logging in the migrator (includes repo + GitLab IDs/branches) to make long-running failures easier to pinpoint.
 - Best-effort migration runs: the migrator continues on per-entity failures and writes errors to `state/errors.log` (override via `--errors-log` / `FORGEJO_ERRORS_LOG`).
 - Migration progress logging: phase/timing logs at INFO level to make long runs easier to follow.
+- Optional issue/comment DB fast-path import: `--fast-db-issues` (or `FORGEJO_FAST_DB_ISSUES=1`) inserts issues/comments directly into Forgejo DB tables for significantly faster large-repo migration runs, with fallback to API mode on DB-step failure.
 
 ### Fixed
 
