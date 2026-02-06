@@ -71,6 +71,22 @@ For production handoff, keep this migration stack as the source of truth, then l
 
 Important: preserve Forgejo secrets from `/data/gitea/conf/app.ini` (or equivalent env) when moving instances. Changing secrets after migration can break encrypted data (tokens, OAuth secrets, etc.).
 
+## CI/CD and container registry
+
+For the GitLab CI migration itself, use a Woodpecker-first strategy:
+
+- Primary target for existing `.gitlab-ci.yml` pipelines: `.woodpecker.yml` (closer job model, usually less rewrite than Actions).
+- Keep complex pipeline logic in versioned shell scripts (for example `ci/*.sh`) and keep CI YAML focused on orchestration.
+- Use Forgejo Actions selectively for new/simple workflows where full GitLab pipeline parity is not required.
+
+For Docker images and other OCI artifacts:
+
+- Use Forgejo's built-in container registry on the same domain as Forgejo.
+- Image naming format: `<forgejo-domain>/<owner>/<image>:<tag>`.
+- Default storage is Forgejo package storage (`packages/`); in this Docker setup that is under `/data/gitea/packages`.
+- If running behind a reverse proxy/subpath, route `/v2` to Forgejo explicitly (Docker registry API path is fixed).
+- For Coolify production, prefer object storage (S3/MinIO) for package/registry blobs once image volume grows.
+
 ## Performance notes
 
 Import performance depends heavily on the Forgejo instance configuration. By default this repo starts Forgejo in a migration-friendly mode:

@@ -40,6 +40,7 @@ The format is based on *Keep a Changelog*.
 - 2FA portability warning: logs users with GitLab 2FA enabled and notes that backup-only migration cannot preserve GitLab TOTP/WebAuthn credentials.
 - `docker-compose.ngrok.yml` override file to set Forgejo `DOMAIN`/`ROOT_URL`/`SSH_DOMAIN` from `FORGEJO_PUBLIC_DOMAIN` for ngrok demos.
 - README handoff notes for moving a completed local migration into a Coolify-hosted Forgejo deployment (DB + `/data` lift-and-shift, canonical URL/secrets caveats).
+- README notes on post-migration CI/CD direction (Woodpecker-first for GitLab pipeline parity) and Docker image/OCI registry placement in Forgejo package storage.
 
 ### Fixed
 
