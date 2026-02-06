@@ -38,6 +38,7 @@ The format is based on *Keep a Changelog*.
 - Optional issue/comment DB fast-path import: `--fast-db-issues` (or `FORGEJO_FAST_DB_ISSUES=1`) inserts issues/comments directly into Forgejo DB tables for significantly faster large-repo migration runs, with fallback to API mode on DB-step failure.
 - GitLab user SSH key migration (`keys` table): user-owned SSH keys are imported through Forgejo's user key API.
 - 2FA portability warning: logs users with GitLab 2FA enabled and notes that backup-only migration cannot preserve GitLab TOTP/WebAuthn credentials.
+- `docker-compose.ngrok.yml` override file to set Forgejo `DOMAIN`/`ROOT_URL`/`SSH_DOMAIN` from `FORGEJO_PUBLIC_DOMAIN` for ngrok demos.
 
 ### Fixed
 
