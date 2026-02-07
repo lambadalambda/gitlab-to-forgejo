@@ -15,6 +15,7 @@ from gitlab_to_forgejo.forgejo_db import (
     build_fast_note_import_sql,
     build_metadata_fix_sql,
     build_password_hash_fix_sql,
+    build_sequence_resync_sql,
 )
 from gitlab_to_forgejo.forgejo_wiki import ensure_wiki_repo_exists
 from gitlab_to_forgejo.git_push import push_bundle_http
@@ -2158,3 +2159,8 @@ def migrate_plan(
             apply_metadata_fix_sql(sql)
         except Exception:
             logger.exception("Apply metadata fix SQL failed")
+    with _phase("Resync sequences (DB)"):
+        try:
+            apply_metadata_fix_sql(build_sequence_resync_sql())
+        except Exception:
+            logger.exception("Apply sequence resync SQL failed")

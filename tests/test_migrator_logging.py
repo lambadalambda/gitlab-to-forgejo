@@ -139,3 +139,34 @@ def test_migrate_plan_logs_phase_progress(caplog: pytest.LogCaptureFixture) -> N
     assert "Starting migration" in caplog.text
     assert "Users/orgs/teams" in caplog.text
     assert "Backfill metadata" in caplog.text
+    assert "Resync sequences" in caplog.text
+
+
+def test_migrate_plan_applies_sequence_resync_sql_at_end() -> None:
+    plan = Plan(
+        backup_id="x",
+        orgs=[],
+        repos=[],
+        users=[],
+        org_members={},
+        issues=[],
+        merge_requests=[],
+        notes=[],
+    )
+
+    with (
+        patch("gitlab_to_forgejo.migrator.build_metadata_fix_sql", return_value="--metadata"),
+        patch("gitlab_to_forgejo.migrator.build_sequence_resync_sql", return_value="--seqsync"),
+        patch("gitlab_to_forgejo.migrator.apply_metadata_fix_sql") as apply_sql,
+    ):
+        migrate_plan(
+            plan,
+            client=object(),  # type: ignore[arg-type]
+            user_password="pw",
+            private_repos=True,
+            forgejo_url="http://example.test",
+            git_username="root",
+            git_token="t0",
+        )
+
+    assert [call.args[0] for call in apply_sql.call_args_list][-2:] == ["--metadata", "--seqsync"]

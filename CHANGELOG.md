@@ -41,6 +41,7 @@ The format is based on *Keep a Changelog*.
 - `docker-compose.ngrok.yml` override file to set Forgejo `DOMAIN`/`ROOT_URL`/`SSH_DOMAIN` from `FORGEJO_PUBLIC_DOMAIN` for ngrok demos.
 - README handoff notes for moving a completed local migration into a Coolify-hosted Forgejo deployment (DB + `/data` lift-and-shift, canonical URL/secrets caveats).
 - README notes on post-migration CI/CD direction (Woodpecker-first for GitLab pipeline parity) and Docker image/OCI registry placement in Forgejo package storage.
+- Final migration DB sequence resync step: the migrator now runs a PostgreSQL owned-sequence reset (`setval` to `MAX(id)+1`) after import/backfill to prevent post-migration 500s from sequence drift after direct DB inserts.
 
 ### Fixed
 

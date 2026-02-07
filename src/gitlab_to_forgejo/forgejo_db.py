@@ -372,6 +372,43 @@ def build_fast_note_import_sql(
     return "\n".join(lines) + "\n", comment_id_by_gitlab_note_id
 
 
+def build_sequence_resync_sql() -> str:
+    return "\n".join(
+        [
+            "DO $$",
+            "DECLARE",
+            "    seq_rec record;",
+            "BEGIN",
+            "    FOR seq_rec IN",
+            "        SELECT",
+            "            c.relname AS seq_name,",
+            "            n.nspname AS seq_schema,",
+            "            t.relname AS table_name,",
+            "            tn.nspname AS table_schema,",
+            "            a.attname AS col_name",
+            "        FROM pg_class c",
+            "        JOIN pg_namespace n ON n.oid = c.relnamespace",
+            "        JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'a'",
+            "        JOIN pg_class t ON t.oid = d.refobjid",
+            "        JOIN pg_namespace tn ON tn.oid = t.relnamespace",
+            "        JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = d.refobjsubid",
+            "        WHERE c.relkind = 'S'",
+            "          AND n.nspname = 'public'",
+            "    LOOP",
+            "        EXECUTE format(",
+            "            'SELECT setval(%L, COALESCE((SELECT MAX(%I) FROM %I.%I), 0) + 1, false);',",
+            "            seq_rec.seq_schema || '.' || seq_rec.seq_name,",
+            "            seq_rec.col_name,",
+            "            seq_rec.table_schema,",
+            "            seq_rec.table_name",
+            "        );",
+            "    END LOOP;",
+            "END $$;",
+            "",
+        ]
+    )
+
+
 def apply_metadata_fix_sql(sql: str) -> None:
     if not sql.strip():
         return
